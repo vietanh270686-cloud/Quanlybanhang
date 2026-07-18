@@ -5,6 +5,9 @@ import { requestCloseTopModal, takePendingConfirmAction } from './modal.js';
 import { openProductModal, handleProductModalAction } from './products.js';
 import { openCustomerModal, handleCustomerModalAction } from './customers.js';
 import { openSalesScreen, handleSalesScreenAction } from './salesOrdersScreen.js';
+import { openPartnerModal, handlePartnerModalAction } from './partners.js';
+import { openPurchaseScreen, handlePurchaseScreenAction } from './purchaseOrdersScreen.js';
+import { openDebtScreen, handleDebtScreenAction } from './debtScreen.js';
 
 let appStarted = false;
 
@@ -31,6 +34,9 @@ function startAppEvents(){
     if(handleProductModalAction(action, el)) return;
     if(handleCustomerModalAction(action, el)) return;
     if(handleSalesScreenAction(action, el)) return;
+    if(handlePartnerModalAction(action, el)) return;
+    if(handlePurchaseScreenAction(action, el)) return;
+    if(handleDebtScreenAction(action, el)) return;
 
     switch(action){
       case 'logout':
@@ -64,6 +70,15 @@ function startAppEvents(){
         break;
       case 'open-sales-screen':
         openSalesScreen();
+        break;
+      case 'open-partner':
+        openPartnerModal(el.dataset.id || null);
+        break;
+      case 'open-purchase-screen':
+        openPurchaseScreen();
+        break;
+      case 'open-debt-screen':
+        openDebtScreen();
         break;
     }
   });

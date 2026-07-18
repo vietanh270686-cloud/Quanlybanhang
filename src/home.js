@@ -113,7 +113,7 @@ function renderResults(results){
         <div class="result-icon" style="background:var(--kho-bg); color:var(--kho);">${ICON.box}</div>
         <div class="result-main">
           <div class="result-title">${esc(p.name)}</div>
-          <div class="result-sub">Giá nhập: ${(p.import_price||0).toLocaleString('vi-VN')}₫</div>
+          <div class="result-sub">Nhập gần nhất: ${(p.latestPartner?p.latestPartner.price:p.import_price||0).toLocaleString('vi-VN')}₫${p.latestPartner?' · '+esc(p.latestPartner.partnerName||''):''}</div>
         </div>
         <div class="result-meta">Lẻ ${(p.sell_price_retail||0).toLocaleString('vi-VN')}₫<br><span style="font-weight:600; color:var(--ink-faint); font-size:11px;">Sỉ ${(p.sell_price_wholesale||0).toLocaleString('vi-VN')}₫</span></div>
       </div>`;
