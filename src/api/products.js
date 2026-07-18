@@ -72,3 +72,17 @@ export async function searchProductsByName(query, limit){
   if(error) throw error;
   return data||[];
 }
+
+// Đối tác gần nhất cho MỖI sản phẩm (dùng cho gợi ý "Đặt từ đối tác" ở Thêm sản phẩm nhanh)
+export async function getLatestPartnerPricesMap(){
+  const { data, error } = await supabase
+    .from('partner_prices')
+    .select('product_id, partner_id, price, quoted_at, partners(name)')
+    .order('quoted_at', { ascending:false });
+  if(error) throw error;
+  const map = {};
+  (data||[]).forEach(r=>{
+    if(!map[r.product_id]) map[r.product_id] = { partnerId:r.partner_id, partnerName:r.partners?.name, price:r.price, date:r.quoted_at };
+  });
+  return map;
+}

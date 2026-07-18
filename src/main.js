@@ -3,6 +3,8 @@ import { initAuth, renderLoginView, hideLoginView, signOut } from './auth.js';
 import { renderHome, clearSearch } from './home.js';
 import { requestCloseTopModal, takePendingConfirmAction } from './modal.js';
 import { openProductModal, handleProductModalAction } from './products.js';
+import { openCustomerModal, handleCustomerModalAction } from './customers.js';
+import { openSalesScreen, handleSalesScreenAction } from './salesOrdersScreen.js';
 
 let appStarted = false;
 
@@ -27,6 +29,8 @@ function startAppEvents(){
     const action = el.dataset.action;
 
     if(handleProductModalAction(action, el)) return;
+    if(handleCustomerModalAction(action, el)) return;
+    if(handleSalesScreenAction(action, el)) return;
 
     switch(action){
       case 'logout':
@@ -54,6 +58,12 @@ function startAppEvents(){
         break;
       case 'create-from-search':
         openProductModal(null);
+        break;
+      case 'open-customer':
+        openCustomerModal(el.dataset.id || null);
+        break;
+      case 'open-sales-screen':
+        openSalesScreen();
         break;
     }
   });
