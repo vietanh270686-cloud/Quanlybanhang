@@ -1,5 +1,5 @@
 import { ICON } from './icons.js';
-import { esc, fmtVND } from './utils.js';
+import { esc, fmtVND, debounce } from './utils.js';
 import { openModal, rerenderTopModal, closeTopModal, loadingSkeleton, errorBanner } from './modal.js';
 import { showToast } from './toast.js';
 import { getProduct, updateProduct, getPartnerPrice, setPartnerPrice, searchPartnersByName } from './api/products.js';
@@ -87,16 +87,21 @@ function bodyHtml(){
         </div>
       </div>
 
+      ${!draft.partnerId ? `
+      <div class="card" style="margin-bottom:12px;">
+        <div class="search-box">${ICON.search}<input id="rs-partner-search" placeholder="Gõ tên đối tác…" value="${esc(draft.partnerQuery)}"></div>
+      </div>
       <div class="card">
         <div class="field-label" style="margin-bottom:9px;">Nhập từ đối tác</div>
-        <div class="search-box" style="margin-bottom:8px;">${ICON.search}<input id="rs-partner-search" placeholder="Gõ tên đối tác…" value="${esc(draft.partnerQuery)}"></div>
-        ${!draft.partnerId ? `
         <div id="rs-partner-list">${matches.length ? matches.map(pt=>`
           <div class="quickadd-row" data-action="restock-pick-partner" data-partnerid="${pt.id}" data-partnername="${esc(pt.name)}">
             <div class="quickadd-left"><span class="dot dot-doitac"></span><div class="quickadd-name">${esc(pt.name)}</div></div>
             ${ICON.chevRight}
           </div>`).join('') : `<div class="field-note">Không tìm thấy đối tác phù hợp.</div>`}</div>
-        ` : `
+      </div>
+      ` : `
+      <div class="card">
+        <div class="field-label" style="margin-bottom:9px;">Nhập từ đối tác</div>
         <div style="display:flex; align-items:center; justify-content:space-between; padding:11px 12px; border:1.5px solid var(--primary); background:#F1F5FA; border-radius:12px; margin-bottom:10px;">
           <div style="display:flex; align-items:center; gap:8px;"><span class="dot dot-doitac"></span><b style="font-size:13.5px;">${esc(draft.partnerName)}</b></div>
           <button type="button" class="btn btn-ghost btn-sm" data-action="restock-clear-partner">Đổi</button>
@@ -117,8 +122,8 @@ function bodyHtml(){
             <div class="field-note">Gợi ý ${fmtVND(draft.suggestedPrice)} — sửa được nếu giá lần này khác.</div>
           </div>
         </div>
-        `}
       </div>
+      `}
     </div>
     <div class="modal-foot">
       ${draft.partnerId ? `
@@ -135,6 +140,13 @@ function repaint(){
   rerenderTopModal(bodyHtml());
   wireInputs();
 }
+const schedulePartnerSearch = debounce(async ()=>{
+  if(!draft) return;
+  draft.partnerResults = await searchPartnersByName(draft.partnerQuery).catch(()=>draft.partnerResults);
+  repaint();
+  const fresh = wrap?.querySelector('#rs-partner-search');
+  if(fresh){ fresh.focus(); fresh.setSelectionRange(fresh.value.length, fresh.value.length); }
+}, 1000);
 function wireInputs(){
   if(!wrap?.isConnected || !draft) return;
   const stockQtyEl = wrap.querySelector('#rs-stock-qty');
@@ -144,12 +156,9 @@ function wireInputs(){
     repaint();
   });
   const pSearch = wrap.querySelector('#rs-partner-search');
-  if(pSearch) pSearch.addEventListener('input', async e=>{
+  if(pSearch) pSearch.addEventListener('input', e=>{
     draft.partnerQuery = e.target.value;
-    draft.partnerResults = await searchPartnersByName(draft.partnerQuery).catch(()=>draft.partnerResults);
-    repaint();
-    const fresh = wrap.querySelector('#rs-partner-search');
-    if(fresh){ fresh.focus(); fresh.setSelectionRange(fresh.value.length, fresh.value.length); }
+    schedulePartnerSearch();
   });
   const pQtyEl = wrap.querySelector('#rs-partner-qty');
   if(pQtyEl) pQtyEl.addEventListener('input', e=>{

@@ -1,5 +1,5 @@
 import { ICON } from './icons.js';
-import { esc, fmtVND, fmtDateInputToVN } from './utils.js';
+import { esc, fmtVND, fmtDateInputToVN, debounce } from './utils.js';
 import { openModal, rerenderTopModal, openConfirmModal, loadingSkeleton, errorBanner } from './modal.js';
 import { showToast } from './toast.js';
 import {
@@ -79,7 +79,9 @@ function screenHtml(){
         <div class="debt-tab-btn ${debtTab==='partner'?'active':''}" data-action="set-debt-tab" data-tab="partner">Công nợ Đối tác</div>
       </div>
 
-      <div class="search-box" style="margin:0 16px 12px;">${ICON.search}<input id="debt-search" placeholder="Tìm toàn bộ ${label}…" value="${esc(debtQuery)}" autocomplete="off"></div>
+      <div class="card" style="margin:0 16px 12px;">
+        <div class="search-box">${ICON.search}<input id="debt-search" placeholder="Tìm toàn bộ ${label}…" value="${esc(debtQuery)}" autocomplete="off"></div>
+      </div>
 
       ${entitiesLoading ? `<div style="padding:0 16px;">${loadingSkeleton(3)}</div>`
         : entitiesError ? errorBanner('Không tải được danh sách công nợ — kiểm tra lại kết nối mạng.', { retryAction:'retry-debt-screen' })
@@ -135,6 +137,14 @@ function screenHtml(){
   `;
 }
 
+const scheduleDebtSearch = debounce(async ()=>{
+  selectedDebtId = null;
+  debtForm = null;
+  await loadEntities();
+  const fresh = document.getElementById('debt-search');
+  if(fresh){ fresh.focus(); fresh.setSelectionRange(fresh.value.length, fresh.value.length); }
+}, 1000);
+
 function wireInputs(){
   const byId = id=>document.getElementById(id);
   const a = byId('debt-amount'); if(a) a.addEventListener('input', e=>{ debtForm.debtAmount = parseFloat(e.target.value)||0; });
@@ -144,11 +154,7 @@ function wireInputs(){
   if(s){
     s.addEventListener('input', e=>{
       debtQuery = e.target.value;
-      selectedDebtId = null;
-      debtForm = null;
-      loadEntities();
-      const fresh = document.getElementById('debt-search');
-      if(fresh){ fresh.focus(); fresh.setSelectionRange(fresh.value.length, fresh.value.length); }
+      scheduleDebtSearch();
     });
   }
 }

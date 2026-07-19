@@ -1,5 +1,5 @@
 import { ICON } from './icons.js';
-import { esc, fmtDate } from './utils.js';
+import { esc, fmtDate, debounce } from './utils.js';
 import { getHomeCounts } from './api/dashboard.js';
 import { searchAll } from './api/search.js';
 import { loadingSkeleton, errorBanner } from './modal.js';
@@ -69,10 +69,25 @@ function shellHtml({ loading }){
   `;
 }
 
+const runSearch = debounce(async ()=>{
+  const resultsWrap = document.getElementById('resultsWrap');
+  if(!resultsWrap) return;
+  resultsWrap.innerHTML = `<div class="results"><div class="loading-center">Đang tìm…</div></div>`;
+  const myQuery = searchQuery;
+  try{
+    const results = await searchAll(myQuery);
+    if(myQuery !== searchQuery) return; // người dùng đã gõ tiếp, bỏ kết quả cũ
+    resultsWrap.innerHTML = renderResults(results);
+  } catch(err){
+    if(myQuery !== searchQuery) return;
+    resultsWrap.innerHTML = `<div class="results">${errorBanner('Không tìm kiếm được — kiểm tra lại kết nối mạng.')}</div>`;
+  }
+}, 1000);
+
 function wireSearchInput(){
   const input = document.getElementById('searchInput');
   if(!input) return;
-  input.addEventListener('input', async e=>{
+  input.addEventListener('input', e=>{
     searchQuery = e.target.value;
     const resultsWrap = document.getElementById('resultsWrap');
     document.querySelector('.search-clear').classList.toggle('show', !!searchQuery);
@@ -82,16 +97,7 @@ function wireSearchInput(){
     if(bif) bif.style.display = searchQuery ? 'none' : 'block';
     if(hb) hb.style.display = searchQuery ? 'none' : 'flex';
     if(!searchQuery){ resultsWrap.innerHTML = ''; return; }
-    resultsWrap.innerHTML = `<div class="results"><div class="loading-center">Đang tìm…</div></div>`;
-    const myQuery = searchQuery;
-    try{
-      const results = await searchAll(myQuery);
-      if(myQuery !== searchQuery) return; // người dùng đã gõ tiếp, bỏ kết quả cũ
-      resultsWrap.innerHTML = renderResults(results);
-    } catch(err){
-      if(myQuery !== searchQuery) return;
-      resultsWrap.innerHTML = `<div class="results">${errorBanner('Không tìm kiếm được — kiểm tra lại kết nối mạng.')}</div>`;
-    }
+    runSearch();
   });
   input.focus();
   input.setSelectionRange(input.value.length, input.value.length);

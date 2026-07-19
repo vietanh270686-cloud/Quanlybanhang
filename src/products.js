@@ -1,5 +1,5 @@
 import { ICON } from './icons.js';
-import { esc, fmtVND, timeAgo } from './utils.js';
+import { esc, fmtVND, timeAgo, debounce } from './utils.js';
 import { openModal, rerenderTopModal, requestCloseTopModal, openConfirmModal, loadingSkeleton, errorBanner } from './modal.js';
 import { showToast } from './toast.js';
 import { searchQuery, resetSearchAndRefresh } from './home.js';
@@ -171,12 +171,15 @@ function productModalHtml(){
         </div>
       </div>
 
-      <div class="card">
-        <div class="field-label" style="margin-bottom:9px;">Tìm đối tác cung cấp</div>
-        <div class="search-box quickadd-search">
+      <div class="card" style="margin-bottom:12px;">
+        <div class="search-box">
           ${ICON.search}
           <input id="pf-partner-search" placeholder="Gõ tên đối tác…" value="${esc(productPartnerQuery)}" autocomplete="off">
         </div>
+      </div>
+
+      <div class="card">
+        <div class="field-label" style="margin-bottom:9px;">Tìm đối tác cung cấp</div>
         <div class="source-row ${productDraft.source.type==='kho'?'selected':''}" data-action="select-source" data-type="kho">
           <div class="source-left"><span class="dot dot-kho"></span><span class="source-name">Trong kho</span></div>
           <div class="source-price">${productDraft.id ? fmtVND(productDraft.existingImportPrice) : ''}</div>
@@ -224,19 +227,22 @@ function wireProductModalInputs(){
   });
   const partnerSearchEl = byId('pf-partner-search');
   if(partnerSearchEl){
-    partnerSearchEl.addEventListener('input', async e=>{
+    partnerSearchEl.addEventListener('input', e=>{
       productPartnerQuery = e.target.value;
-      const myQuery = productPartnerQuery;
-      await loadFallbackCandidates(myQuery);
-      if(myQuery !== productPartnerQuery) return;
-      rerenderTopModal(productModalHtml());
-      wireProductModalInputs();
-      const fresh = byId('pf-partner-search');
-      fresh.focus();
-      fresh.setSelectionRange(fresh.value.length, fresh.value.length);
+      schedulePartnerSearch();
     });
   }
 }
+
+const schedulePartnerSearch = debounce(async ()=>{
+  const myQuery = productPartnerQuery;
+  await loadFallbackCandidates(myQuery);
+  if(myQuery !== productPartnerQuery) return;
+  rerenderTopModal(productModalHtml());
+  wireProductModalInputs();
+  const fresh = document.getElementById('pf-partner-search');
+  if(fresh){ fresh.focus(); fresh.setSelectionRange(fresh.value.length, fresh.value.length); }
+}, 1000);
 
 export function handleProductModalAction(action, el){
   switch(action){

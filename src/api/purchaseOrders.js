@@ -2,13 +2,22 @@ import { supabase } from '../supabaseClient.js';
 
 const todayStr = () => new Date().toISOString().slice(0,10);
 
+// Đơn nháp (chưa chốt) của đối tác này — không giới hạn theo ngày, vì đơn chưa chốt
+// luôn được coi là "đơn của hôm nay" cho tới khi chốt xong, dù đã tạo từ hôm trước.
 export async function getOrCreateDraftPO(partnerId){
   const { data: existing, error: findErr } = await supabase
     .from('purchase_orders').select('*')
-    .eq('partner_id', partnerId).eq('status','moi').eq('order_date', todayStr())
+    .eq('partner_id', partnerId).eq('status','moi')
+    .order('created_at', { ascending:false }).limit(1)
     .maybeSingle();
   if(findErr) throw findErr;
-  if(existing) return existing;
+  if(existing){
+    if(existing.order_date === todayStr()) return existing;
+    const { data: rolled, error: rollErr } = await supabase
+      .from('purchase_orders').update({ order_date: todayStr() }).eq('id', existing.id).select().single();
+    if(rollErr) throw rollErr;
+    return rolled;
+  }
   const { data, error } = await supabase
     .from('purchase_orders').insert({ partner_id:partnerId, order_date: todayStr(), status:'moi' }).select().single();
   if(error) throw error;

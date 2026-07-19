@@ -2,13 +2,22 @@ import { supabase } from '../supabaseClient.js';
 
 const todayStr = () => new Date().toISOString().slice(0,10);
 
+// Đơn nháp (chưa chốt) của khách này — không giới hạn theo ngày, vì đơn chưa chốt
+// luôn được coi là "đơn của hôm nay" cho tới khi chốt xong, dù đã tạo từ hôm trước.
 export async function getOrCreateDraftSO(customerId){
   const { data: existing, error: findErr } = await supabase
     .from('sales_orders').select('*')
-    .eq('customer_id', customerId).eq('status','moi').eq('order_date', todayStr())
+    .eq('customer_id', customerId).eq('status','moi')
+    .order('created_at', { ascending:false }).limit(1)
     .maybeSingle();
   if(findErr) throw findErr;
-  if(existing) return existing;
+  if(existing){
+    if(existing.order_date === todayStr()) return existing;
+    const { data: rolled, error: rollErr } = await supabase
+      .from('sales_orders').update({ order_date: todayStr() }).eq('id', existing.id).select().single();
+    if(rollErr) throw rollErr;
+    return rolled;
+  }
   const { data, error } = await supabase
     .from('sales_orders').insert({ customer_id:customerId, order_date: todayStr(), status:'moi' }).select().single();
   if(error) throw error;
@@ -68,13 +77,13 @@ export async function closeSalesOrder(id){
   if(error) throw error;
 }
 
-export async function listSalesOrders(){
+export async function listSalesOrdersByDate(date){
   const { data, error } = await supabase
     .from('sales_orders')
     .select('*, customers(id, name, phone, facebook_id), sales_order_lines(*, products(id, name))')
+    .eq('order_date', date)
     .in('status', ['moi','closed'])
-    .order('created_at', { ascending:false })
-    .limit(200);
+    .order('created_at', { ascending:false });
   if(error) throw error;
   // Ẩn đơn nháp rỗng (chưa thêm sản phẩm nào nên tổng tiền = 0) — vẫn giữ trong DB, chỉ không hiện ở danh sách.
   return (data||[]).filter(o=> (o.sales_order_lines||[]).reduce((s,l)=> s + l.qty*l.sell_price, 0) > 0);

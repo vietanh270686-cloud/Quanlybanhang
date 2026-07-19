@@ -201,12 +201,15 @@ function customerModalHtml(){
         </div>
       </div>
 
-      <div class="card">
-        <div class="field-label" style="margin-bottom:9px;">Thêm sản phẩm nhanh</div>
-        <div class="search-box quickadd-search">
+      <div class="card" style="margin-bottom:12px;">
+        <div class="search-box">
           ${ICON.search}
           <input id="qa-search" placeholder="Tìm sản phẩm…" value="${esc(quickAddQuery)}" autocomplete="off">
         </div>
+      </div>
+
+      <div class="card">
+        <div class="field-label" style="margin-bottom:9px;">Thêm sản phẩm nhanh</div>
         <div id="qa-list">${renderQuickAdd()}</div>
       </div>
     </div>

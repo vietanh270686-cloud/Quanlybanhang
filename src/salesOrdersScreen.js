@@ -3,40 +3,66 @@ import { esc, fmtDate, fmtVND, facebookProfileUrl } from './utils.js';
 import { openModal, rerenderTopModal, openConfirmModal, loadingSkeleton, emptyState, errorBanner } from './modal.js';
 import { showToast } from './toast.js';
 import {
-  listSalesOrders, getSalesOrder, cancelSalesOrder, closeSalesOrder,
+  listSalesOrdersByDate, getSalesOrder, cancelSalesOrder, closeSalesOrder,
   orderTotal, orderLineProfit, orderProfit,
 } from './api/salesOrders.js';
 
+const todayStr = () => new Date().toISOString().slice(0,10);
+
 let screenWrap = null;
-let screenOrders = null;
+let selectedDate = todayStr();
+let customerQuery = '';
+let dayOrders = null;   // toàn bộ đơn trong ngày đang xem, CHƯA lọc theo tên khách hàng
 let screenError = null;
 
 export async function openSalesScreen(){
-  screenOrders = null; screenError = null;
+  selectedDate = todayStr();
+  customerQuery = '';
+  dayOrders = null; screenError = null;
   screenWrap = openModal(screenHtml(true), {});
-  await loadOrders();
+  wireInputs();
+  await loadOrdersForDate();
 }
 
-async function loadOrders(){
+async function loadOrdersForDate(){
+  const myDate = selectedDate;
   try{
-    screenOrders = await listSalesOrders();
+    dayOrders = await listSalesOrdersByDate(myDate);
+    if(myDate !== selectedDate) return;
     screenError = null;
   } catch(err){
+    if(myDate !== selectedDate) return;
     screenError = err;
   }
-  if(screenWrap && screenWrap.isConnected){
-    rerenderTopModal(screenHtml(false));
-  }
+  if(screenWrap?.isConnected){ rerenderTopModal(screenHtml(false)); wireInputs(); }
 }
 
 export function notifySalesOrdersChanged(){
   if(screenWrap && screenWrap.isConnected && document.body.contains(screenWrap)){
-    loadOrders();
+    loadOrdersForDate();
   }
 }
 
+function filteredOrders(){
+  const q = customerQuery.trim().toLowerCase();
+  if(!q || !dayOrders) return dayOrders||[];
+  return dayOrders.filter(o=>{
+    const c = o.customers;
+    return (c?.name||'').toLowerCase().includes(q) || (c?.phone||'').includes(q);
+  });
+}
+function dayTotal(){
+  if(!dayOrders) return 0;
+  return dayOrders.reduce((s,o)=> s + (o.sales_order_lines||[]).reduce((s2,l)=> s2 + l.qty*l.sell_price, 0), 0);
+}
+function dayProfit(){
+  if(!dayOrders) return 0;
+  return dayOrders.reduce((s,o)=> s + (o.sales_order_lines||[]).reduce((s2,l)=> s2 + (l.sell_price-l.import_price_at_sale)*l.qty, 0), 0);
+}
+
 function screenHtml(loading){
-  const count = screenOrders ? screenOrders.length : 0;
+  const filtered = filteredOrders();
+  const count = dayOrders ? filtered.length : 0;
   return `
     <div class="modal-handle"></div>
     <div class="modal-head">
@@ -47,10 +73,34 @@ function screenHtml(loading){
       <div style="font-size:12px; color:var(--ink-faint); font-weight:600;">${loading?'':count+' đơn'}</div>
     </div>
     <div class="modal-body" style="padding-left:0; padding-right:0;">
-      ${loading ? `<div style="padding:0 18px;">${loadingSkeleton(3)}</div>`
-        : screenError ? errorBanner('Không tải được danh sách đơn bán — kiểm tra lại kết nối mạng.', { retryAction:'retry-sales-screen' })
-        : screenOrders.length ? screenOrders.map(o=>renderSOCard(o)).join('')
-        : emptyState('Chưa có đơn bán nào', 'Tạo đơn bằng cách chạm vào một khách hàng ở màn hình chính.')}
+      <div style="padding:0 16px;">
+        <div class="card" style="margin-bottom:12px;">
+          <div class="field">
+            <div class="field-label">Ngày</div>
+            <input class="input" type="date" id="so-date" value="${selectedDate}">
+          </div>
+          <div class="field">
+            <div class="field-label">Tìm khách hàng trong ngày</div>
+            <div class="search-box">${ICON.search}<input id="so-cust-search" placeholder="Gõ tên hoặc SĐT khách hàng…" value="${esc(customerQuery)}" autocomplete="off"></div>
+          </div>
+          <div class="field-row" style="margin-bottom:0;">
+            <div class="field" style="margin-bottom:0;">
+              <div class="field-label">Tổng tiền bán</div>
+              <div class="readonly-field" style="font-weight:800; font-family:'Sora';">${loading?'…':fmtVND(dayTotal())}</div>
+            </div>
+            <div class="field" style="margin-bottom:0;">
+              <div class="field-label">Lãi / Lỗ</div>
+              <div class="readonly-field" style="font-weight:800; font-family:'Sora'; color:${loading?'inherit':(dayProfit()>=0?'var(--profit)':'var(--loss)')};">${loading?'…':(dayProfit()>=0?'+':'−')+fmtVND(Math.abs(dayProfit()))}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="so-list">
+        ${loading ? `<div style="padding:0 16px;">${loadingSkeleton(3)}</div>`
+          : screenError ? errorBanner('Không tải được danh sách đơn bán — kiểm tra lại kết nối mạng.', { retryAction:'retry-sales-screen' })
+          : filtered.length ? filtered.map(o=>renderSOCard(o)).join('')
+          : emptyState('Không có đơn bán nào', customerQuery.trim() ? 'Không tìm thấy khách hàng phù hợp trong ngày này.' : 'Tạo đơn bằng cách chạm vào một khách hàng ở màn hình chính.')}
+      </div>
     </div>
   `;
 }
@@ -94,6 +144,30 @@ function renderSOCard(o){
   </div>`;
 }
 
+function wireInputs(){
+  if(!screenWrap?.isConnected) return;
+  const dateEl = screenWrap.querySelector('#so-date');
+  if(dateEl) dateEl.addEventListener('change', e=>{
+    selectedDate = e.target.value || todayStr();
+    dayOrders = null;
+    rerenderTopModal(screenHtml(true));
+    wireInputs();
+    loadOrdersForDate();
+  });
+  const searchEl = screenWrap.querySelector('#so-cust-search');
+  if(searchEl) searchEl.addEventListener('input', e=>{
+    customerQuery = e.target.value;
+    const listEl = screenWrap.querySelector('#so-list');
+    if(listEl){
+      const filtered = filteredOrders();
+      listEl.innerHTML = filtered.length ? filtered.map(o=>renderSOCard(o)).join('')
+        : emptyState('Không có đơn bán nào', customerQuery.trim() ? 'Không tìm thấy khách hàng phù hợp trong ngày này.' : 'Tạo đơn bằng cách chạm vào một khách hàng ở màn hình chính.');
+    }
+    const headCount = screenWrap.querySelector('.modal-head > div:last-child');
+    if(headCount) headCount.textContent = filteredOrders().length+' đơn';
+  });
+}
+
 const BANK_INFO = 'STK: 1282666675 — Ngân hàng BIDV, Chi nhánh Tràng Tiền, Hà Nội';
 
 function buildBillText(o){
@@ -104,8 +178,12 @@ function buildBillText(o){
   return `HÓA ĐƠN — ${custName}\nNgày: ${fmtDate(o.order_date)}\n\n${body}\n\nTổng cộng: ${fmtVND(total)}\n\nThông tin chuyển khoản:\n${BANK_INFO}`;
 }
 
+function findOrder(id){
+  return (dayOrders||[]).find(x=>x.id===id);
+}
+
 async function copyBillText(id, silent){
-  const o = (screenOrders||[]).find(x=>x.id===id);
+  const o = findOrder(id);
   if(!o) return;
   try{
     await navigator.clipboard.writeText(buildBillText(o));
@@ -121,7 +199,7 @@ async function copyBillText(id, silent){
 // (bất đồng bộ) xong mới mở thì nhiều trình duyệt di động sẽ chặn popup vì không còn
 // tính là hành động trực tiếp của người dùng nữa.
 async function sendBill(id, channel){
-  const o = (screenOrders||[]).find(x=>x.id===id);
+  const o = findOrder(id);
   if(!o) return;
   if(channel==='zalo' && o.customers?.phone){
     window.open(`https://zalo.me/${o.customers.phone}`, '_blank', 'noopener');
@@ -192,7 +270,7 @@ async function viewSODetail(id){
 async function closeSOFromList(id){
   try{
     await closeSalesOrder(id);
-    await loadOrders();
+    await loadOrdersForDate();
   } catch(err){
     showToast('Không chốt được đơn — kiểm tra lại kết nối mạng.', []);
   }
@@ -201,7 +279,7 @@ function confirmCancelSOFromList(id, name){
   openConfirmModal('Hủy đơn hàng?', `Bạn có chắc muốn hủy đơn hàng của "${esc(name||'khách này')}" không? Không thể hoàn tác thao tác này.`, async ()=>{
     try{
       await cancelSalesOrder(id);
-      await loadOrders();
+      await loadOrdersForDate();
     } catch(err){
       showToast('Không hủy được đơn hàng — kiểm tra lại kết nối mạng.', []);
     }
@@ -213,7 +291,7 @@ export function handleSalesScreenAction(action, el){
     case 'view-so-detail': viewSODetail(el.dataset.id); return true;
     case 'close-so-list': closeSOFromList(el.dataset.id); return true;
     case 'cancel-so-list': confirmCancelSOFromList(el.dataset.id, el.dataset.name); return true;
-    case 'retry-sales-screen': loadOrders(); return true;
+    case 'retry-sales-screen': loadOrdersForDate(); return true;
     case 'send-bill': sendBill(el.dataset.id, el.dataset.channel); return true;
     case 'copy-bill': copyBillText(el.dataset.id); return true;
   }

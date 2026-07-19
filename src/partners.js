@@ -206,12 +206,15 @@ function partnerModalHtml(){
         </div>
       </div>
 
-      <div class="card">
-        <div class="field-label" style="margin-bottom:9px;">Tìm sản phẩm nhanh</div>
-        <div class="search-box quickadd-search">
+      <div class="card" style="margin-bottom:12px;">
+        <div class="search-box">
           ${ICON.search}
           <input id="qa-search-p" placeholder="Tìm sản phẩm…" value="${esc(quickAddQuery)}" autocomplete="off">
         </div>
+      </div>
+
+      <div class="card">
+        <div class="field-label" style="margin-bottom:9px;">Tìm sản phẩm nhanh</div>
         <div id="qa-list-p">${renderQuickAdd()}</div>
       </div>
     </div>
