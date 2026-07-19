@@ -8,6 +8,7 @@ import {
   getPartnerHistoryForProduct, setPartnerPrice, deletePartnerPrice,
   searchPartnersByName,
 } from './api/products.js';
+import { findByExactName } from './supabaseClient.js';
 
 let productDraft = null;
 let productPartnerQuery = '';
@@ -185,7 +186,7 @@ function productModalHtml(){
           <div class="source-price">${productDraft.id ? fmtVND(productDraft.existingImportPrice) : ''}</div>
         </div>
         ${productCandidatesLoading ? loadingSkeleton(2) : candidates.map(h=>`
-          <div class="source-row ${productDraft.source.type==='partner'&&productDraft.source.partnerId===h.partnerId?'selected':''}" data-action="select-source" data-type="partner" data-partner="${h.partnerId}" data-price="${h.price||0}" data-name="${esc(h.name)}">
+          <div class="source-row ${productDraft.source.type==='partner'&&productDraft.source.partnerId===h.partnerId?'selected':''}" data-action="select-source" data-type="partner" data-partner="${h.partnerId}" data-price="${h.price||0}" data-known="${h.known?1:0}" data-name="${esc(h.name)}">
             <div class="source-left">
               <span class="dot dot-doitac"></span>
               <div>
@@ -251,7 +252,11 @@ export function handleProductModalAction(action, el){
       if(el.dataset.type==='kho'){
         productDraft.source = { type:'kho', price: productDraft.id ? productDraft.existingImportPrice : 0 };
       } else {
-        productDraft.source = { type:'partner', partnerId: el.dataset.partner, price: parseFloat(el.dataset.price) };
+        // Đối tác chưa từng nhập sản phẩm này -> mặc định lấy giá nhập trong kho làm gợi ý,
+        // thay vì để trống/0.
+        const known = el.dataset.known === '1';
+        const price = known ? parseFloat(el.dataset.price) : (productDraft.existingImportPrice||0);
+        productDraft.source = { type:'partner', partnerId: el.dataset.partner, price };
       }
       paintProductModal();
       return true;
@@ -296,7 +301,7 @@ async function commitDeleteProduct(){
   }
 }
 
-function saveProductDraft(){
+async function saveProductDraft(){
   const name = (productDraft.name||'').trim();
   if(!name){
     productDraft.errors = { name:true, any:true };
@@ -304,6 +309,15 @@ function saveProductDraft(){
     return;
   }
   productDraft.errors = {};
+  if(!productDraft.id){
+    try{
+      const dup = await findByExactName('products', name);
+      if(dup){
+        openConfirmModal('Tên sản phẩm đã tồn tại', `Đã có sản phẩm tên "${name}" trong hệ thống. Vẫn muốn tạo thêm sản phẩm trùng tên?`, ()=>commitProductSave());
+        return;
+      }
+    } catch(err){ /* không chặn tạo mới nếu kiểm tra trùng tên bị lỗi mạng */ }
+  }
   commitProductSave();
 }
 

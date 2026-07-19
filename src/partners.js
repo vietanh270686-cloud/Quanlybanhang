@@ -4,6 +4,7 @@ import { openModal, rerenderTopModal, requestCloseTopModal, openConfirmModal, lo
 import { showToast } from './toast.js';
 import { resetSearchAndRefresh } from './home.js';
 import { getPartner, createPartner, updatePartner, upsertPartnerContact } from './api/partners.js';
+import { findByExactName } from './supabaseClient.js';
 import {
   getOrCreateDraftPO, listPOLines, addPOLine, updatePOLine, deletePOLine,
   cancelPurchaseOrder, aggregatedDemandForPartner,
@@ -31,9 +32,9 @@ export async function openPartnerModal(idOrNull){
   poRecord = null; poLines = []; localDraftLines = []; localLineSeq = 0;
   quickAddQuery = ''; demandMap = {}; productHistoryIds = [];
 
-  openModal(loadingModalHtml(isNewPartner ? 'Đối tác mới' : 'Đối tác'), {
-    onBeforeClose: onPartnerModalClose,
-  });
+  // Đối tác mới chỉ được tạo khi bấm nút "Tạo mới" — đóng popup theo cách khác
+  // (backdrop, nút X, Hủy đơn) sẽ bỏ dở hoàn toàn, không tự lưu.
+  openModal(loadingModalHtml(isNewPartner ? 'Đối tác mới' : 'Đối tác'));
 
   try{
     quickAddProducts = await searchProductsByName('');
@@ -64,10 +65,25 @@ export async function openPartnerModal(idOrNull){
   paint();
 }
 
-function onPartnerModalClose(){
-  if(!isNewPartner) return;
+function saveNewPartnerForm(){
   const typedName = (partnerDraft.name||'').trim();
-  if(!typedName) return;
+  if(!typedName){
+    partnerDraft.errors = { name:true, any:true };
+    paint();
+    return;
+  }
+  partnerDraft.errors = {};
+  checkDupThenCommitNewPartner(typedName);
+}
+
+async function checkDupThenCommitNewPartner(typedName){
+  try{
+    const dup = await findByExactName('partners', typedName);
+    if(dup){
+      openConfirmModal('Tên đối tác đã tồn tại', `Đã có đối tác tên "${typedName}" trong hệ thống. Vẫn muốn tạo thêm đối tác trùng tên?`, ()=>commitNewPartner(typedName));
+      return;
+    }
+  } catch(err){ /* không chặn tạo mới nếu kiểm tra trùng tên bị lỗi mạng */ }
   commitNewPartner(typedName);
 }
 
@@ -85,6 +101,7 @@ async function commitNewPartner(typedName){
       }
       notifyPurchaseOrdersChanged();
     }
+    requestCloseTopModal();
     resetSearchAndRefresh();
     showToast(`Đã tạo đối tác "${typedName}".`, [], { icon:ICON.check });
   } catch(err){
@@ -221,7 +238,7 @@ function partnerModalHtml(){
     <div class="modal-foot">
       <button class="btn btn-danger-ghost" data-action="cancel-po">${ICON.x} Hủy đơn</button>
       ${isNewUnsaved
-        ? `<button class="btn btn-primary btn-block" data-action="close-modal">${ICON.check} Xong</button>`
+        ? `<button class="btn btn-primary btn-block" data-action="create-partner">${ICON.check} Tạo mới</button>`
         : `<button class="btn btn-primary btn-block" data-action="save-partner">${ICON.check} Lưu thay đổi</button>`
       }
     </div>
@@ -482,6 +499,7 @@ export function handlePartnerModalAction(action, el){
     case 'po-add-line': poAddLine(el.dataset.productid); return true;
     case 'apply-demand': applyDemand(); return true;
     case 'save-partner': savePartnerForm(); return true;
+    case 'create-partner': saveNewPartnerForm(); return true;
     case 'cancel-po': confirmCancelPO(); return true;
     case 'retry-partner-modal': openPartnerModal(partnerId); return true;
   }

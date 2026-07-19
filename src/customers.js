@@ -4,6 +4,7 @@ import { openModal, rerenderTopModal, requestCloseTopModal, openConfirmModal, lo
 import { showToast } from './toast.js';
 import { searchQuery, resetSearchAndRefresh } from './home.js';
 import { getCustomer, createCustomer, updateCustomer } from './api/customers.js';
+import { findByExactName } from './supabaseClient.js';
 import {
   getOrCreateDraftSO, listSOLines, addSOLine, updateSOLine, deleteSOLine,
   updatePendingDemandQty, cancelSalesOrder,
@@ -31,9 +32,9 @@ export async function openCustomerModal(idOrNull){
   soRecord = null; soLines = []; localDraftLines = []; localLineSeq = 0;
   quickAddQuery = '';
 
-  openModal(loadingModalHtml(isNewCustomer ? 'Khách hàng mới' : 'Khách hàng'), {
-    onBeforeClose: onCustomerModalClose,
-  });
+  // Khách mới chỉ được tạo khi bấm nút "Tạo mới" — đóng popup theo cách khác (backdrop,
+  // nút X, Hủy đơn) sẽ bỏ dở hoàn toàn, không tự lưu.
+  openModal(loadingModalHtml(isNewCustomer ? 'Khách hàng mới' : 'Khách hàng'));
 
   try{
     const [products, importMap] = await Promise.all([ searchProductsByName(''), getLatestImportPriceMap() ]);
@@ -54,12 +55,25 @@ export async function openCustomerModal(idOrNull){
   paint();
 }
 
-function onCustomerModalClose(){
-  if(!isNewCustomer){
-    return; // khách cũ: mọi thay đổi đã lưu (hoặc chưa lưu tên nếu người dùng chưa bấm Lưu — chấp nhận mất phần chỉnh tên chưa lưu)
-  }
+function saveNewCustomerForm(){
   const typedName = (customerDraft.name||'').trim();
-  if(!typedName) return; // chưa gõ gì -> không tạo gì cả, không có gì để dọn vì chưa từng insert
+  if(!typedName){
+    customerDraft.errors = { name:true, any:true };
+    paint();
+    return;
+  }
+  customerDraft.errors = {};
+  checkDupThenCommitNewCustomer(typedName);
+}
+
+async function checkDupThenCommitNewCustomer(typedName){
+  try{
+    const dup = await findByExactName('customers', typedName);
+    if(dup){
+      openConfirmModal('Tên khách hàng đã tồn tại', `Đã có khách hàng tên "${typedName}" trong hệ thống. Vẫn muốn tạo thêm khách hàng trùng tên?`, ()=>commitNewCustomer(typedName));
+      return;
+    }
+  } catch(err){ /* không chặn tạo mới nếu kiểm tra trùng tên bị lỗi mạng */ }
   commitNewCustomer(typedName);
 }
 
@@ -82,6 +96,7 @@ async function commitNewCustomer(typedName){
       }
       notifySalesOrdersChanged();
     }
+    requestCloseTopModal();
     resetSearchAndRefresh();
     showToast(`Đã tạo khách hàng "${typedName}".`, [], { icon:ICON.check });
   } catch(err){
@@ -216,7 +231,7 @@ function customerModalHtml(){
     <div class="modal-foot">
       <button class="btn btn-danger-ghost" data-action="cancel-so">${ICON.x} Hủy đơn</button>
       ${isNewUnsaved
-        ? `<button class="btn btn-primary btn-block" data-action="close-modal">${ICON.check} Xong</button>`
+        ? `<button class="btn btn-primary btn-block" data-action="create-customer">${ICON.check} Tạo mới</button>`
         : `<button class="btn btn-primary btn-block" data-action="save-customer">${ICON.check} Lưu thay đổi</button>`
       }
     </div>
@@ -521,6 +536,7 @@ export function handleCustomerModalAction(action, el){
     case 'so-add-line': soAddLine(el.dataset.productid); return true;
     case 'set-customer-type': setCustomerType(el.dataset.type); return true;
     case 'save-customer': saveCustomerForm(); return true;
+    case 'create-customer': saveNewCustomerForm(); return true;
     case 'cancel-so': confirmCancelSO(); return true;
     case 'retry-customer-modal': openCustomerModal(customerId); return true;
     case 'open-restock': openRestockModal(el.dataset.productid, parseInt(el.dataset.orderqty), handleRestocked); return true;
