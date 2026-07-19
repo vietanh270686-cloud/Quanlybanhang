@@ -15,3 +15,11 @@ export async function updateCustomer(id, patch){
   if(error) throw error;
   return data;
 }
+
+export async function searchCustomersByName(query, limit){
+  let q = supabase.from('customers').select('*').order('name').limit(limit||50);
+  if(query) q = q.or(`name.ilike.%${query}%,phone.ilike.%${query}%`);
+  const { data, error } = await q;
+  if(error) throw error;
+  return data||[];
+}

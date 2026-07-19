@@ -157,20 +157,25 @@ function renderMainIcons(loading){
   const c = homeCounts;
   return `
   <div class="main-icons">
-    <div class="icon-tile" data-action="open-product" data-id="">
+    <div class="icon-tile" data-action="open-product-menu">
       <div class="icon-circle" style="background:var(--kho-bg); color:var(--kho);">${ICON.box}</div>
       <div class="icon-tile-label">Sản phẩm</div>
       <div class="icon-tile-count">${c.products} mặt hàng</div>
     </div>
-    <div class="icon-tile" data-action="open-customer" data-id="">
+    <div class="icon-tile" data-action="open-customer-menu">
       <div class="icon-circle" style="background:#EAF0FB; color:#2C5289;">${ICON.user}</div>
       <div class="icon-tile-label">Khách hàng</div>
       <div class="icon-tile-count">${c.customers} khách</div>
     </div>
-    <div class="icon-tile" data-action="open-partner" data-id="">
+    <div class="icon-tile" data-action="open-partner-menu">
       <div class="icon-circle" style="background:var(--doitac-bg); color:var(--doitac);">${ICON.truck}</div>
       <div class="icon-tile-label">Đối tác</div>
       <div class="icon-tile-count">${c.partners} đối tác</div>
+    </div>
+    <div class="icon-tile" data-action="open-warehouse">
+      <div class="icon-circle" style="background:#F1EAFB; color:#6B4FA0;">${ICON.warehouse}</div>
+      <div class="icon-tile-label">Kho hàng</div>
+      <div class="icon-tile-count">&nbsp;</div>
     </div>
   </div>`;
 }

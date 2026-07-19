@@ -18,7 +18,7 @@ export async function getOrCreateDraftSO(customerId){
 export async function listSOLines(salesOrderId){
   const { data, error } = await supabase
     .from('sales_order_lines')
-    .select('*, products(id, name, sell_price_retail, sell_price_wholesale), partners(id, name)')
+    .select('*, products(id, name, sell_price_retail, sell_price_wholesale, import_price, stock_qty), partners(id, name)')
     .eq('sales_order_id', salesOrderId)
     .order('id');
   if(error) throw error;
@@ -27,13 +27,13 @@ export async function listSOLines(salesOrderId){
 
 export async function addSOLine(fields){
   const { data, error } = await supabase.from('sales_order_lines').insert(fields)
-    .select('*, products(id, name, sell_price_retail, sell_price_wholesale), partners(id, name)').single();
+    .select('*, products(id, name, sell_price_retail, sell_price_wholesale, import_price, stock_qty), partners(id, name)').single();
   if(error) throw error;
   return data;
 }
 export async function updateSOLine(lineId, patch){
   const { data, error } = await supabase.from('sales_order_lines').update(patch).eq('id', lineId)
-    .select('*, products(id, name, sell_price_retail, sell_price_wholesale), partners(id, name)').single();
+    .select('*, products(id, name, sell_price_retail, sell_price_wholesale, import_price, stock_qty), partners(id, name)').single();
   if(error) throw error;
   return data;
 }

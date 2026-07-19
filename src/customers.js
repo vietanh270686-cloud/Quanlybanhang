@@ -6,11 +6,11 @@ import { searchQuery, resetSearchAndRefresh } from './home.js';
 import { getCustomer, createCustomer, updateCustomer } from './api/customers.js';
 import {
   getOrCreateDraftSO, listSOLines, addSOLine, updateSOLine, deleteSOLine,
-  createPendingDemand, updatePendingDemandQty, cancelSalesOrder,
-  orderTotal, orderLineProfit,
+  updatePendingDemandQty, cancelSalesOrder,
 } from './api/salesOrders.js';
-import { searchProductsByName, getLatestPartnerPricesMap, getPartnerPrice } from './api/products.js';
+import { searchProductsByName, getLatestImportPriceMap } from './api/products.js';
 import { notifySalesOrdersChanged } from './salesOrdersScreen.js';
+import { openRestockModal } from './restockModal.js';
 
 let customerId = null;
 let isNewCustomer = false;
@@ -21,7 +21,7 @@ let localDraftLines = [];        // dòng hàng cục bộ, chưa lưu DB (khác
 let localLineSeq = 0;
 let quickAddQuery = '';
 let quickAddProducts = [];
-let latestPartnerMap = {};
+let latestImportMap = {};
 let modalLoadError = null;
 
 export async function openCustomerModal(idOrNull){
@@ -36,9 +36,9 @@ export async function openCustomerModal(idOrNull){
   });
 
   try{
-    const [products, partnerMap] = await Promise.all([ searchProductsByName(''), getLatestPartnerPricesMap() ]);
+    const [products, importMap] = await Promise.all([ searchProductsByName(''), getLatestImportPriceMap() ]);
     quickAddProducts = products;
-    latestPartnerMap = partnerMap;
+    latestImportMap = importMap;
 
     if(isNewCustomer){
       customerDraft = { name: searchQuery || '', phone:'', address:'', type:'le', errors:{} };
@@ -74,14 +74,10 @@ async function commitNewCustomer(typedName){
     if(localDraftLines.length){
       const so = await getOrCreateDraftSO(newCust.id);
       for(const l of localDraftLines){
-        const line = await addSOLine({
+        await addSOLine({
           sales_order_id: so.id, product_id:l.productId, qty:l.qty, sell_price:l.sellPrice,
-          source_type:l.sourceType, partner_id: l.sourceType==='partner' ? l.partnerId : null,
-          import_price_at_sale:l.importPriceAtSale,
+          source_type:'kho', partner_id:null, import_price_at_sale:l.importPriceAtSale,
         });
-        if(l.sourceType==='partner'){
-          await createPendingDemand({ sales_order_line_id:line.id, product_id:l.productId, partner_id:l.partnerId, qty:l.qty });
-        }
       }
       notifySalesOrdersChanged();
     }
@@ -112,16 +108,15 @@ function displayLines(){
   if(isNewCustomer){
     return localDraftLines.map(l=>({
       id: l.localId, productId:l.productId, productName:l.productName,
-      qty:l.qty, sellPrice:l.sellPrice, sourceType:l.sourceType,
-      partnerId:l.partnerId, partnerName:l.partnerName,
-      sellPriceRetail:l.sellPriceRetail, sellPriceWholesale:l.sellPriceWholesale,
+      qty:l.qty, sellPrice:l.sellPrice,
+      latestImportPrice:l.latestImportPrice, stockQty:l.stockQty,
     }));
   }
   return soLines.map(l=>({
     id:l.id, productId:l.product_id, productName:l.products?.name,
-    qty:l.qty, sellPrice:l.sell_price, sourceType:l.source_type,
-    partnerId:l.partner_id, partnerName:l.partners?.name,
-    sellPriceRetail:l.products?.sell_price_retail, sellPriceWholesale:l.products?.sell_price_wholesale,
+    qty:l.qty, sellPrice:l.sell_price,
+    latestImportPrice: latestImportMap[l.product_id]!=null ? latestImportMap[l.product_id] : l.products?.import_price,
+    stockQty:l.products?.stock_qty||0,
   }));
 }
 function currentTotal(){
@@ -214,16 +209,12 @@ function customerModalHtml(){
 }
 
 function renderSOLines(lines){
-  return lines.map(l=>`
+  return lines.map(l=>{
+    const short = l.stockQty < l.qty;
+    return `
     <div class="line-row">
       <div class="line-top">
-        <div>
-          <div class="line-name">${esc(l.productName)}</div>
-          <div class="line-src ${l.sourceType==='kho'?'kho':'doitac'}">
-            <span class="dot ${l.sourceType==='kho'?'dot-kho':'dot-doitac'}"></span>
-            ${l.sourceType==='kho'?'Trong kho':'Chờ nhập · '+esc(l.partnerName||'')}
-          </div>
-        </div>
+        <div class="line-name">${esc(l.productName)}</div>
         <div class="line-remove" data-action="so-remove-line" data-lineid="${l.id}">${ICON.trash}</div>
       </div>
       <div class="line-bottom">
@@ -237,9 +228,14 @@ function renderSOLines(lines){
         </div>
         <div class="line-total">${fmtVND(l.qty*l.sellPrice)}</div>
       </div>
-      <div class="line-refnote">Giá lẻ: ${fmtVND(l.sellPriceRetail)} · Giá sỉ: ${fmtVND(l.sellPriceWholesale)}</div>
+      <div class="line-refnote with-stock">
+        <span>Giá nhập gần nhất: ${fmtVND(l.latestImportPrice||0)}</span>
+        <span class="stock-pill ${short?'low':'ok'}">Tồn kho: ${l.stockQty}</span>
+        ${short?`<button type="button" class="restock-btn" data-action="open-restock" data-productid="${l.productId}" data-orderqty="${l.qty}">${ICON.warn} Nhập hàng</button>`:''}
+      </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 
 function renderQuickAdd(){
@@ -248,30 +244,15 @@ function renderQuickAdd(){
   if(q) products = products.filter(p=>p.name.toLowerCase().includes(q));
   if(!products.length) return `<div class="field-note">Không tìm thấy sản phẩm phù hợp.</div>`;
   const custType = customerDraft.type;
-  let html = `<div class="quickadd-group-label">Trong kho ${custType==='si'?'· giá sỉ':'· giá lẻ'}</div>`;
-  products.forEach(p=>{
+  return products.map(p=>{
     const price = custType==='si' ? p.sell_price_wholesale : p.sell_price_retail;
-    html += `<div class="quickadd-row" data-action="so-add-line" data-productid="${p.id}" data-source="kho">
+    return `<div class="quickadd-row" data-action="so-add-line" data-productid="${p.id}">
       <div class="quickadd-left"><span class="dot dot-kho"></span>
-        <div><div class="quickadd-name">${esc(p.name)}</div><div class="quickadd-price">${fmtVND(price)}</div></div>
+        <div><div class="quickadd-name">${esc(p.name)}</div><div class="quickadd-price">${fmtVND(price)} · tồn ${p.stock_qty||0}</div></div>
       </div>
       <div class="quickadd-add">${ICON.plus}</div>
     </div>`;
-  });
-  const withPartner = products.filter(p=>latestPartnerMap[p.id]);
-  if(withPartner.length){
-    html += `<div class="quickadd-group-label">Đặt từ đối tác (chờ nhập)</div>`;
-    withPartner.forEach(p=>{
-      const lp = latestPartnerMap[p.id];
-      html += `<div class="quickadd-row" data-action="so-add-line" data-productid="${p.id}" data-source="partner" data-partnerid="${lp.partnerId}">
-        <div class="quickadd-left"><span class="dot dot-doitac"></span>
-          <div><div class="quickadd-name">${esc(p.name)}</div><div class="quickadd-price">${esc(lp.partnerName||'')}</div></div>
-        </div>
-        <div class="quickadd-add">${ICON.plus}</div>
-      </div>`;
-    });
-  }
-  return html;
+  }).join('');
 }
 
 function wireInputs(){
@@ -297,24 +278,18 @@ function findProductCache(productId){
   return quickAddProducts.find(p=>p.id===productId);
 }
 
-async function soAddLine(productId, sourceType, partnerId){
+async function soAddLine(productId){
   const p = findProductCache(productId);
   if(!p) return;
   const custType = customerDraft.type;
   const sellPrice = custType==='si' ? p.sell_price_wholesale : p.sell_price_retail;
-  let importPriceAtSale = p.import_price || 0;
-  let partnerName = '';
-  if(sourceType==='partner'){
-    const pp = await getPartnerPrice(partnerId, productId).catch(()=>null);
-    importPriceAtSale = pp ? pp.price : p.import_price;
-    partnerName = latestPartnerMap[productId]?.partnerName || '';
-  }
+  const importPriceAtSale = p.import_price || 0;
 
   if(isNewCustomer){
     localDraftLines.push({
       localId: 'local-'+(++localLineSeq), productId, productName:p.name, qty:1, sellPrice,
-      sourceType, partnerId: sourceType==='partner'?partnerId:null, partnerName,
-      sellPriceRetail:p.sell_price_retail, sellPriceWholesale:p.sell_price_wholesale, importPriceAtSale,
+      latestImportPrice: latestImportMap[productId]!=null ? latestImportMap[productId] : p.import_price,
+      stockQty: p.stock_qty||0, importPriceAtSale,
     });
     paint();
     return;
@@ -322,13 +297,9 @@ async function soAddLine(productId, sourceType, partnerId){
   try{
     const line = await addSOLine({
       sales_order_id: soRecord.id, product_id:productId, qty:1, sell_price:sellPrice,
-      source_type:sourceType, partner_id: sourceType==='partner'?partnerId:null, import_price_at_sale:importPriceAtSale,
+      source_type:'kho', partner_id:null, import_price_at_sale:importPriceAtSale,
     });
     soLines.push(line);
-    if(sourceType==='partner'){
-      await createPendingDemand({ sales_order_line_id:line.id, product_id:productId, partner_id:partnerId, qty:1 });
-      notifySalesOrdersChanged();
-    }
     paint();
   } catch(err){
     showToast('Không thêm được sản phẩm vào đơn — kiểm tra lại kết nối mạng.', []);
@@ -501,15 +472,41 @@ function confirmCancelSO(){
   });
 }
 
+function handleRestocked({ productId, stockQty, importPrice }){
+  const cached = quickAddProducts.find(p=>p.id===productId);
+  if(cached){
+    cached.stock_qty = stockQty;
+    if(importPrice!=null) cached.import_price = importPrice;
+  }
+  if(importPrice!=null) latestImportMap[productId] = importPrice;
+  if(isNewCustomer){
+    localDraftLines.forEach(l=>{
+      if(l.productId===productId){
+        l.stockQty = stockQty;
+        if(importPrice!=null) l.latestImportPrice = importPrice;
+      }
+    });
+  } else {
+    soLines.forEach(l=>{
+      if(l.product_id===productId && l.products){
+        l.products.stock_qty = stockQty;
+        if(importPrice!=null) l.products.import_price = importPrice;
+      }
+    });
+  }
+  paint();
+}
+
 export function handleCustomerModalAction(action, el){
   switch(action){
     case 'so-remove-line': soRemoveLine(el.dataset.lineid); return true;
     case 'so-qty': soChangeQty(el.dataset.lineid, parseInt(el.dataset.delta)); return true;
-    case 'so-add-line': soAddLine(el.dataset.productid, el.dataset.source, el.dataset.partnerid); return true;
+    case 'so-add-line': soAddLine(el.dataset.productid); return true;
     case 'set-customer-type': setCustomerType(el.dataset.type); return true;
     case 'save-customer': saveCustomerForm(); return true;
     case 'cancel-so': confirmCancelSO(); return true;
     case 'retry-customer-modal': openCustomerModal(customerId); return true;
+    case 'open-restock': openRestockModal(el.dataset.productid, parseInt(el.dataset.orderqty), handleRestocked); return true;
   }
   return false;
 }

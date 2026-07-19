@@ -86,3 +86,41 @@ export async function getLatestPartnerPricesMap(){
   });
   return map;
 }
+
+// Giá nhập gần nhất cho MỖI sản phẩm (không quan tâm đối tác nào) — dùng cho dòng đơn bán
+export async function getLatestImportPriceMap(){
+  const { data, error } = await supabase
+    .from('partner_prices')
+    .select('product_id, price, quoted_at')
+    .order('quoted_at', { ascending:false });
+  if(error) throw error;
+  const map = {};
+  (data||[]).forEach(r=>{ if(map[r.product_id]===undefined) map[r.product_id] = r.price; });
+  return map;
+}
+
+// Giá nhập trung bình theo MỖI sản phẩm, tính trên mọi lần nhập của mọi đối tác — dùng cho Kho hàng
+export async function getAvgImportPriceMap(){
+  const { data, error } = await supabase.from('partner_prices').select('product_id, price');
+  if(error) throw error;
+  const sums = {};
+  (data||[]).forEach(r=>{
+    if(!sums[r.product_id]) sums[r.product_id] = { total:0, count:0 };
+    sums[r.product_id].total += r.price;
+    sums[r.product_id].count += 1;
+  });
+  const map = {};
+  Object.keys(sums).forEach(pid=>{ map[pid] = Math.round(sums[pid].total/sums[pid].count); });
+  return map;
+}
+
+// Danh sách sản phẩm cho màn Kho hàng: không gõ tìm kiếm -> chỉ sản phẩm còn tồn;
+// có gõ tìm kiếm -> toàn bộ sản phẩm khớp tên (kể cả đã hết hàng) để chủ động cập nhật lại tồn kho.
+export async function listWarehouseProducts(query){
+  let q = supabase.from('products').select('*').order('name');
+  if(query) q = q.ilike('name', `%${query}%`);
+  else q = q.gt('stock_qty', 0);
+  const { data, error } = await q;
+  if(error) throw error;
+  return data||[];
+}

@@ -20,3 +20,11 @@ export async function upsertPartnerContact(partnerId, seq, { name, phone }){
     .upsert({ partner_id:partnerId, seq, name, phone }, { onConflict:'partner_id,seq' });
   if(error) throw error;
 }
+
+export async function searchPartnersFull(query, limit){
+  let q = supabase.from('partners').select('*').order('name').limit(limit||50);
+  if(query) q = q.ilike('name', `%${query}%`);
+  const { data, error } = await q;
+  if(error) throw error;
+  return data||[];
+}

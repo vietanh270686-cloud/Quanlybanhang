@@ -114,23 +114,23 @@ body{
 /* ---------- Home icons ---------- */
 .section-gap{height:6px;}
 .main-icons{
-  display:grid; grid-template-columns:repeat(3,1fr); gap:10px;
+  display:grid; grid-template-columns:repeat(4,1fr); gap:8px;
   padding:18px 16px 6px;
 }
 .icon-tile{
   background:var(--card); border:1px solid var(--line-soft);
-  border-radius:16px; padding:16px 8px 12px;
-  display:flex; flex-direction:column; align-items:center; gap:9px;
+  border-radius:16px; padding:14px 4px 11px;
+  display:flex; flex-direction:column; align-items:center; gap:7px;
   cursor:pointer; transition:transform .12s;
   box-shadow:var(--shadow-card);
 }
 .icon-tile:active{transform:scale(.96);}
 .icon-circle{
-  width:46px; height:46px; border-radius:50%;
+  width:40px; height:40px; border-radius:50%;
   display:flex; align-items:center; justify-content:center;
 }
-.icon-tile-label{font-size:12.5px; font-weight:600; color:var(--ink);}
-.icon-tile-count{font-size:10.5px; color:var(--ink-faint); font-weight:500;}
+.icon-tile-label{font-size:11.5px; font-weight:600; color:var(--ink); text-align:center;}
+.icon-tile-count{font-size:9.5px; color:var(--ink-faint); font-weight:500;}
 
 .bottom-icons{
   display:grid; grid-template-columns:1fr 1fr; gap:10px;
@@ -422,4 +422,28 @@ button{font-family:'Inter'; cursor:pointer; border:none; outline:none;}
 .demo-tag{
   text-align:center; font-size:10.5px; color:var(--ink-faint); padding:14px 20px 4px; line-height:1.5;
 }
+
+/* Menu danh sách (Sản phẩm/Khách hàng/Đối tác) */
+.add-new-row{
+  display:flex; align-items:center; gap:9px; padding:10px 12px; border-radius:12px; border:1.5px dashed var(--line);
+  color:var(--primary); font-size:13px; font-weight:700; cursor:pointer; margin-bottom:10px;
+}
+.add-new-row:active{background:var(--line-soft);}
+
+/* Kho hàng */
+.kho-row{ background:#fff; border:1px solid var(--line-soft); border-radius:12px; padding:11px 12px; margin-bottom:8px; }
+.kho-row-name{font-size:13.5px; font-weight:700; margin-bottom:9px;}
+.kho-row-grid{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+.kho-field{display:flex; flex-direction:column; gap:4px;}
+.kho-field-label{font-size:10px; color:var(--ink-faint); font-weight:700; text-transform:uppercase; letter-spacing:.04em;}
+.kho-total{margin-left:auto; text-align:right;}
+.kho-total-value{font-size:14px; font-weight:800; font-family:'Sora';}
+
+/* Tồn kho trong dòng đơn bán */
+.stock-pill{ font-size:10.5px; font-weight:700; padding:3px 8px; border-radius:20px; white-space:nowrap; }
+.stock-pill.ok{background:var(--kho-bg); color:var(--kho);}
+.stock-pill.low{background:var(--loss-bg); color:var(--loss);}
+.restock-btn{ background:var(--doitac-bg); color:var(--doitac); border:1px solid #EFDDC0; font-size:11px; font-weight:700; padding:5px 10px; border-radius:8px; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+.line-refnote.with-stock{display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;}
+
 ::selection{background:#CBDCEC;}

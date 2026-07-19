@@ -8,6 +8,11 @@ import { openSalesScreen, handleSalesScreenAction } from './salesOrdersScreen.js
 import { openPartnerModal, handlePartnerModalAction } from './partners.js';
 import { openPurchaseScreen, handlePurchaseScreenAction } from './purchaseOrdersScreen.js';
 import { openDebtScreen, handleDebtScreenAction } from './debtScreen.js';
+import { openProductMenu, handleProductMenuAction } from './productsMenu.js';
+import { openCustomerMenu, handleCustomerMenuAction } from './customersMenu.js';
+import { openPartnerMenu, handlePartnerMenuAction } from './partnersMenu.js';
+import { openWarehouseScreen, handleWarehouseAction } from './warehouseScreen.js';
+import { handleRestockModalAction } from './restockModal.js';
 
 let appStarted = false;
 
@@ -37,6 +42,11 @@ function startAppEvents(){
     if(handlePartnerModalAction(action, el)) return;
     if(handlePurchaseScreenAction(action, el)) return;
     if(handleDebtScreenAction(action, el)) return;
+    if(handleProductMenuAction(action, el)) return;
+    if(handleCustomerMenuAction(action, el)) return;
+    if(handlePartnerMenuAction(action, el)) return;
+    if(handleWarehouseAction(action, el)) return;
+    if(handleRestockModalAction(action, el)) return;
 
     switch(action){
       case 'logout':
@@ -79,6 +89,18 @@ function startAppEvents(){
         break;
       case 'open-debt-screen':
         openDebtScreen();
+        break;
+      case 'open-product-menu':
+        openProductMenu();
+        break;
+      case 'open-customer-menu':
+        openCustomerMenu();
+        break;
+      case 'open-partner-menu':
+        openPartnerMenu();
+        break;
+      case 'open-warehouse':
+        openWarehouseScreen();
         break;
     }
   });
