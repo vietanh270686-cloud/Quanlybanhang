@@ -24,3 +24,11 @@ export function facebookProfileUrl(facebookId){
   const id = (facebookId||'').trim();
   return /^\d+$/.test(id) ? `https://www.facebook.com/profile.php?id=${id}` : `https://www.facebook.com/${id}`;
 }
+// Trì hoãn tìm kiếm cho tới khi ngừng gõ ms mili-giây — tránh gọi Supabase liên tục theo từng phím.
+export function debounce(fn, ms){
+  let timer = null;
+  return function(...args){
+    if(timer) clearTimeout(timer);
+    timer = setTimeout(()=>fn(...args), ms);
+  };
+}

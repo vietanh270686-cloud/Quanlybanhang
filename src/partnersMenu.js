@@ -1,5 +1,5 @@
 import { ICON } from './icons.js';
-import { esc } from './utils.js';
+import { esc, debounce } from './utils.js';
 import { openModal, rerenderTopModal, loadingSkeleton, errorBanner } from './modal.js';
 import { searchPartnersFull } from './api/partners.js';
 import { openPartnerModal } from './partners.js';
@@ -34,7 +34,9 @@ function menuHtml(){
     <div class="modal-handle"></div>
     <div class="modal-head"><div class="modal-title">Đối tác</div><div class="icon-btn" data-action="close-modal">${ICON.close}</div></div>
     <div class="modal-body">
-      <div class="search-box" style="margin-bottom:10px;">${ICON.search}<input id="ptm-search" placeholder="Gõ tên đối tác để tìm…" value="${esc(query)}" autocomplete="off"></div>
+      <div class="card" style="margin-bottom:12px;">
+        <div class="search-box">${ICON.search}<input id="ptm-search" placeholder="Gõ tên đối tác để tìm…" value="${esc(query)}" autocomplete="off"></div>
+      </div>
       <div class="add-new-row" data-action="ptm-add-new">${ICON.plus} Thêm đối tác mới</div>
       <div id="ptm-list">${listHtml()}</div>
     </div>
@@ -52,13 +54,16 @@ function listHtml(){
     </div>
   </div>`).join('');
 }
+const scheduleSearch = debounce(()=>{
+  if(wrap?.isConnected) wrap.querySelector('#ptm-list').innerHTML = loadingSkeleton(2);
+  load();
+}, 1000);
 function wireSearch(){
   const input = wrap.querySelector('#ptm-search');
   if(!input) return;
   input.addEventListener('input', e=>{
     query = e.target.value;
-    wrap.querySelector('#ptm-list').innerHTML = loadingSkeleton(2);
-    load();
+    scheduleSearch();
   });
   input.focus();
   input.setSelectionRange(input.value.length, input.value.length);

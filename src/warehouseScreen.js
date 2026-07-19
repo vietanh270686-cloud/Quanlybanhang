@@ -1,5 +1,5 @@
 import { ICON } from './icons.js';
-import { esc, fmtVND } from './utils.js';
+import { esc, fmtVND, debounce } from './utils.js';
 import { openModal, rerenderTopModal, loadingSkeleton, errorBanner } from './modal.js';
 import { showToast } from './toast.js';
 import { listWarehouseProducts, getAvgImportPriceMap, updateProduct } from './api/products.js';
@@ -53,8 +53,10 @@ function screenHtml(){
     <div class="modal-handle"></div>
     <div class="modal-head"><div class="modal-title">Kho hàng</div><div class="icon-btn" data-action="close-modal">${ICON.close}</div></div>
     <div class="modal-body">
-      <div class="search-box" style="margin-bottom:4px;">${ICON.search}<input id="kho-search" placeholder="Gõ tên sản phẩm để tìm…" value="${esc(query)}" autocomplete="off"></div>
-      <div class="field-note" style="margin-bottom:10px;">Mặc định chỉ hiện sản phẩm còn tồn kho — gõ tìm kiếm để thấy cả sản phẩm đã hết hàng và cập nhật lại.</div>
+      <div class="card" style="margin-bottom:12px;">
+        <div class="search-box">${ICON.search}<input id="kho-search" placeholder="Gõ tên sản phẩm để tìm…" value="${esc(query)}" autocomplete="off"></div>
+        <div class="field-note">Mặc định chỉ hiện sản phẩm còn tồn kho — gõ tìm kiếm để thấy cả sản phẩm đã hết hàng và cập nhật lại.</div>
+      </div>
       <div id="kho-list">${listHtml()}</div>
       <div class="order-total-bar">
         <div class="order-total-label">Tổng tiền hàng tồn kho</div>
@@ -95,13 +97,16 @@ function listHtml(){
     </div>
   `).join('');
 }
+const scheduleSearch = debounce(()=>{
+  if(wrap?.isConnected) wrap.querySelector('#kho-list').innerHTML = loadingSkeleton(2);
+  load();
+}, 1000);
 function wireSearch(){
   const input = wrap.querySelector('#kho-search');
   if(!input) return;
   input.addEventListener('input', e=>{
     query = e.target.value;
-    wrap.querySelector('#kho-list').innerHTML = loadingSkeleton(2);
-    load();
+    scheduleSearch();
   });
   input.focus();
   input.setSelectionRange(input.value.length, input.value.length);
