@@ -62,8 +62,9 @@ export async function cancelSalesOrder(id){
   const { error } = await supabase.from('sales_orders').update({ status:'cancelled' }).eq('id', id);
   if(error) throw error;
 }
+// Chốt đơn bán chạy qua Postgres function để cộng công nợ khách hàng trong cùng 1 giao dịch.
 export async function closeSalesOrder(id){
-  const { error } = await supabase.from('sales_orders').update({ status:'closed' }).eq('id', id);
+  const { error } = await supabase.rpc('close_sales_order', { so_id: id });
   if(error) throw error;
 }
 

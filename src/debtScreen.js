@@ -10,6 +10,7 @@ const DEBT_CONFIRM_THRESHOLD = 2000000;
 
 let screenWrap = null;
 let debtTab = 'customer';
+let debtQuery = '';
 let selectedDebtId = null;
 let debtForm = null;
 let entities = [];
@@ -18,6 +19,7 @@ let entitiesError = null;
 
 export async function openDebtScreen(){
   debtTab = 'customer';
+  debtQuery = '';
   selectedDebtId = null;
   debtForm = null;
   entities = [];
@@ -27,9 +29,15 @@ export async function openDebtScreen(){
   await loadEntities();
 }
 
+function filteredEntities(){
+  const q = debtQuery.trim().toLowerCase();
+  if(!q) return entities;
+  return entities.filter(e=> e.name.toLowerCase().includes(q) || (e.phone||'').includes(q));
+}
+
 async function loadEntities(){
   entitiesLoading = true;
-  if(screenWrap?.isConnected) rerenderTopModal(screenHtml());
+  refresh();
   try{
     entities = await listDebtEntities(debtTab);
     entitiesError = null;
@@ -37,15 +45,18 @@ async function loadEntities(){
     entitiesError = err;
   }
   entitiesLoading = false;
-  if(screenWrap?.isConnected) rerenderTopModal(screenHtml());
+  refresh();
 }
 
 function refresh(){
-  if(screenWrap?.isConnected) rerenderTopModal(screenHtml());
+  if(!screenWrap?.isConnected) return;
+  rerenderTopModal(screenHtml());
+  wireInputs();
 }
 
 function screenHtml(){
   const total = entities.reduce((s,e)=>s+(e.debt||0), 0);
+  const filteredList = filteredEntities();
   const selected = selectedDebtId ? entities.find(e=>e.id===selectedDebtId) : null;
   const label = debtTab==='customer' ? 'khách hàng' : 'đối tác';
   const errors = (debtForm&&debtForm.errors) || {};
@@ -68,13 +79,15 @@ function screenHtml(){
       ${entitiesLoading ? `<div style="padding:0 16px;">${loadingSkeleton(3)}</div>`
         : entitiesError ? errorBanner('Không tải được danh sách công nợ — kiểm tra lại kết nối mạng.', { retryAction:'retry-debt-screen' })
         : `
+      <div class="search-box" style="margin:0 16px 12px;">${ICON.search}<input id="debt-search" placeholder="Tìm ${label} đang nợ…" value="${esc(debtQuery)}" autocomplete="off"></div>
+
       <div class="debt-total-bar">
         <div class="debt-total-label">Tổng ${debtTab==='customer'?'khách hàng đang nợ':'tiền đang nợ đối tác'}</div>
         <div class="debt-total-value">${fmtVND(total)}</div>
       </div>
 
       <div class="debt-list">
-        ${entities.length ? entities.map(e=>`
+        ${filteredList.length ? filteredList.map(e=>`
           <div class="debt-row ${selectedDebtId===e.id?'selected':''}" data-action="select-debt-entity" data-id="${e.id}">
             <div>
               <div class="debt-row-name">${esc(e.name)}</div>
@@ -82,7 +95,7 @@ function screenHtml(){
             </div>
             <div class="debt-row-amount">${fmtVND(e.debt)}</div>
           </div>
-        `).join('') : `<div class="field-note" style="padding:16px;">Không có ${label} nào đang nợ.</div>`}
+        `).join('') : `<div class="field-note" style="padding:16px;">${entities.length ? 'Không tìm thấy '+label+' phù hợp.' : 'Không có '+label+' nào đang nợ.'}</div>`}
       </div>
 
       ${selected ? `
@@ -124,15 +137,24 @@ function wireInputs(){
   const a = byId('debt-amount'); if(a) a.addEventListener('input', e=>{ debtForm.debtAmount = parseFloat(e.target.value)||0; });
   const p = byId('debt-payment'); if(p) p.addEventListener('input', e=>{ debtForm.paymentAmount = e.target.value; });
   const dt = byId('debt-date'); if(dt) dt.addEventListener('input', e=>{ debtForm.paymentDate = e.target.value; });
+  const s = byId('debt-search');
+  if(s){
+    s.addEventListener('input', e=>{
+      debtQuery = e.target.value;
+      refresh();
+      const fresh = document.getElementById('debt-search');
+      if(fresh){ fresh.focus(); fresh.setSelectionRange(fresh.value.length, fresh.value.length); }
+    });
+  }
 }
 
 function paintWithInputs(){
   refresh();
-  wireInputs();
 }
 
 function setDebtTab(tab){
   debtTab = tab;
+  debtQuery = '';
   selectedDebtId = null;
   debtForm = null;
   loadEntities();
