@@ -1,6 +1,5 @@
 import { supabase } from '../supabaseClient.js';
-
-const todayStr = () => new Date().toISOString().slice(0,10);
+import { todayStr } from '../utils.js';
 
 // Đơn nháp (chưa chốt) của khách này — không giới hạn theo ngày, vì đơn chưa chốt
 // luôn được coi là "đơn của hôm nay" cho tới khi chốt xong, dù đã tạo từ hôm trước.

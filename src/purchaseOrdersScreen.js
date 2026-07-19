@@ -1,12 +1,10 @@
 import { ICON } from './icons.js';
-import { esc, fmtDate, fmtVND } from './utils.js';
+import { esc, fmtDate, fmtVND, todayStr } from './utils.js';
 import { openModal, rerenderTopModal, openConfirmModal, loadingSkeleton, emptyState, errorBanner } from './modal.js';
 import { showToast } from './toast.js';
 import {
   listPurchaseOrdersByDate, getPurchaseOrder, cancelPurchaseOrder, closePurchaseOrder, poTotal,
 } from './api/purchaseOrders.js';
-
-const todayStr = () => new Date().toISOString().slice(0,10);
 
 let screenWrap = null;
 let selectedDate = todayStr();
