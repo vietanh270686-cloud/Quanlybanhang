@@ -71,10 +71,12 @@ export async function listSalesOrders(){
   const { data, error } = await supabase
     .from('sales_orders')
     .select('*, customers(id, name, phone, facebook_id), sales_order_lines(*, products(id, name))')
+    .in('status', ['moi','closed'])
     .order('created_at', { ascending:false })
     .limit(200);
   if(error) throw error;
-  return data||[];
+  // Ẩn đơn nháp rỗng (chưa thêm sản phẩm nào nên tổng tiền = 0) — vẫn giữ trong DB, chỉ không hiện ở danh sách.
+  return (data||[]).filter(o=> (o.sales_order_lines||[]).reduce((s,l)=> s + l.qty*l.sell_price, 0) > 0);
 }
 
 export async function getSalesOrder(id){
