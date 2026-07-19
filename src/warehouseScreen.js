@@ -2,13 +2,14 @@ import { ICON } from './icons.js';
 import { esc, fmtVND, debounce } from './utils.js';
 import { openModal, rerenderTopModal, loadingSkeleton, errorBanner } from './modal.js';
 import { showToast } from './toast.js';
-import { listWarehouseProducts, getAvgImportPriceMap, updateProduct } from './api/products.js';
+import { listWarehouseProducts, getAvgImportPriceMap, getPendingKhoQtyMap, updateProduct } from './api/products.js';
 
 let wrap = null;
 let query = '';
 let items = null;
 let itemsError = null;
 let avgMap = {};
+let pendingQtyMap = {}; // productId -> số lượng đang giữ chỗ cho đơn bán chưa chốt (nguồn Trong kho)
 let edits = {}; // productId -> { price, qty } — chỉnh tạm, chỉ ghi vào Supabase khi bấm "Cập nhật"
 
 export async function openWarehouseScreen(){
@@ -18,13 +19,18 @@ export async function openWarehouseScreen(){
   await load();
 }
 
+function minQtyFor(productId){
+  return pendingQtyMap[productId] || 0;
+}
+
 async function load(){
   const myQuery = query;
   try{
-    const [list, avg] = await Promise.all([ listWarehouseProducts(query), getAvgImportPriceMap() ]);
+    const [list, avg, pending] = await Promise.all([ listWarehouseProducts(query), getAvgImportPriceMap(), getPendingKhoQtyMap() ]);
     if(myQuery !== query) return;
     items = list;
     avgMap = avg;
+    pendingQtyMap = pending;
     itemsError = null;
   } catch(err){
     if(myQuery !== query) return;
@@ -73,7 +79,9 @@ function listHtml(){
   if(items===null) return loadingSkeleton(4);
   if(itemsError) return errorBanner('Không tải được danh sách kho hàng — kiểm tra lại kết nối mạng.', { retryAction:'kho-retry' });
   if(!items.length) return `<div class="no-results">Không tìm thấy sản phẩm phù hợp.</div>`;
-  return items.map(p=>`
+  return items.map(p=>{
+    const minQty = minQtyFor(p.id);
+    return `
     <div class="kho-row">
       <div class="kho-row-name">${esc(p.name)}</div>
       <div class="kho-row-grid">
@@ -85,7 +93,7 @@ function listHtml(){
           <div class="kho-field-label">Số lượng</div>
           <div class="qty-stepper">
             <div class="qty-btn" data-action="kho-qty" data-id="${p.id}" data-delta="-1">${ICON.minus}</div>
-            <input class="qty-input" type="number" data-field="kho-qty" data-id="${p.id}" value="${qtyFor(p)}">
+            <input class="qty-input" type="number" min="${minQty}" data-field="kho-qty" data-id="${p.id}" value="${qtyFor(p)}">
             <div class="qty-btn" data-action="kho-qty" data-id="${p.id}" data-delta="1">${ICON.plus}</div>
           </div>
         </div>
@@ -94,8 +102,10 @@ function listHtml(){
           <div class="kho-total-value" data-total-for="${p.id}">${fmtVND(qtyFor(p)*priceFor(p))}</div>
         </div>
       </div>
+      ${minQty>0 ? `<div class="field-note" style="margin-top:6px;">Đang giữ ${minQty} cho đơn bán chưa chốt — không thể đặt tồn kho thấp hơn số này.</div>` : ''}
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 const scheduleSearch = debounce(()=>{
   if(wrap?.isConnected) wrap.querySelector('#kho-list').innerHTML = loadingSkeleton(2);
@@ -124,8 +134,15 @@ function wireRowInputs(){
   wrap.querySelectorAll('[data-field="kho-qty"]').forEach(el=>{
     el.addEventListener('input', e=>{
       const id = el.dataset.id;
+      const minQty = minQtyFor(id);
+      let qty = Math.max(0, parseInt(e.target.value)||0);
+      if(qty < minQty){
+        qty = minQty;
+        e.target.value = qty;
+        showToast(`Không thể đặt tồn kho thấp hơn ${minQty} — đang có đơn bán chưa chốt cần số lượng này.`, []);
+      }
       edits[id] = edits[id] || {};
-      edits[id].qty = Math.max(0, parseInt(e.target.value)||0);
+      edits[id].qty = qty;
       updateRowTotal(id);
       refreshSaveButton();
     });
@@ -146,9 +163,15 @@ function refreshSaveButton(){
 function khoChangeQty(id, delta){
   const p = items.find(x=>x.id===id);
   if(!p) return;
+  const minQty = minQtyFor(id);
   edits[id] = edits[id] || {};
   const current = qtyFor(p);
-  edits[id].qty = Math.max(0, current+delta);
+  const next = Math.max(0, current+delta);
+  if(next < minQty){
+    showToast(`Không thể đặt tồn kho thấp hơn ${minQty} — đang có đơn bán chưa chốt cần số lượng này.`, []);
+    return;
+  }
+  edits[id].qty = next;
   const input = wrap.querySelector(`[data-field="kho-qty"][data-id="${id}"]`);
   if(input) input.value = edits[id].qty;
   updateRowTotal(id);

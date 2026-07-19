@@ -1,4 +1,5 @@
 import { supabase } from '../supabaseClient.js';
+import { todayStr } from '../utils.js';
 
 async function countRows(table, filters){
   let q = supabase.from(table).select('*', { count:'exact', head:true });
@@ -7,8 +8,6 @@ async function countRows(table, filters){
   if(error) throw error;
   return count || 0;
 }
-
-const todayStr = () => new Date().toISOString().slice(0,10);
 
 // Đơn nháp rỗng (mở popup khách hàng/đối tác nhưng chưa thêm sản phẩm) không tính là
 // "đơn đang chờ" — chỉ đếm đơn hôm nay, chưa chốt, và có tổng tiền > 0.

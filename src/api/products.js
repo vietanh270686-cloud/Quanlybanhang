@@ -128,3 +128,17 @@ export async function listWarehouseProducts(query){
   if(error) throw error;
   return data||[];
 }
+
+// Số lượng mỗi sản phẩm đang nằm trong các đơn bán CHƯA CHỐT (nguồn "Trong kho") —
+// dùng để chặn sửa tồn kho ở màn Kho hàng xuống thấp hơn số đang giữ chỗ cho đơn chờ chốt.
+export async function getPendingKhoQtyMap(){
+  const { data, error } = await supabase
+    .from('sales_order_lines')
+    .select('product_id, qty, sales_orders!inner(status)')
+    .eq('source_type', 'kho')
+    .eq('sales_orders.status', 'moi');
+  if(error) throw error;
+  const map = {};
+  (data||[]).forEach(r=>{ map[r.product_id] = (map[r.product_id]||0) + r.qty; });
+  return map;
+}

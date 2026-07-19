@@ -203,7 +203,7 @@ function renderBottomIcons(loading){
       ${c.poToday?`<div class="wide-tile-badge">${c.poToday}</div>`:''}
       <div class="wide-tile-icon">${ICON.cart}</div>
       <div class="wide-tile-text">
-        <div class="wide-tile-label">Hàng nhập hôm nay</div>
+        <div class="wide-tile-label">Hàng nhập</div>
         <div class="wide-tile-sub">Quản lý & chốt đơn</div>
       </div>
     </div>

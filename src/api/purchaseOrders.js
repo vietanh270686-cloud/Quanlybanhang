@@ -1,6 +1,5 @@
 import { supabase } from '../supabaseClient.js';
-
-const todayStr = () => new Date().toISOString().slice(0,10);
+import { todayStr } from '../utils.js';
 
 // Đơn nháp (chưa chốt) của đối tác này — không giới hạn theo ngày, vì đơn chưa chốt
 // luôn được coi là "đơn của hôm nay" cho tới khi chốt xong, dù đã tạo từ hôm trước.
@@ -50,6 +49,30 @@ export async function deletePOLine(lineId){
   if(error) throw error;
 }
 
+// Thêm (hoặc cộng dồn nếu đã có dòng cùng sản phẩm) vào đơn nháp (chờ duyệt) của đối
+// tác này — dùng chung cho mọi nơi có thể "nhập hàng từ đối tác": popup Sản phẩm,
+// popup Nhập hàng (từ Khách hàng), và popup Đối tác — để tất cả gộp về đúng 1 đơn
+// nháp, hiện đầy đủ ở màn Hàng nhập.
+export async function addToPartnerDraftOrder(partnerId, productId, qty, importPrice){
+  const po = await getOrCreateDraftPO(partnerId);
+  const { data: existing, error: findErr } = await supabase
+    .from('purchase_order_lines').select('*, products(id, name)')
+    .eq('purchase_order_id', po.id).eq('product_id', productId).maybeSingle();
+  if(findErr) throw findErr;
+  if(existing){
+    const { data: updated, error: updErr } = await supabase
+      .from('purchase_order_lines').update({ qty: existing.qty + qty, import_price: importPrice })
+      .eq('id', existing.id).select('*, products(id, name)').single();
+    if(updErr) throw updErr;
+    return { po, line: updated, previousLine: existing };
+  }
+  const { data: created, error: insErr } = await supabase
+    .from('purchase_order_lines').insert({ purchase_order_id: po.id, product_id: productId, qty, import_price: importPrice })
+    .select('*, products(id, name)').single();
+  if(insErr) throw insErr;
+  return { po, line: created, previousLine: null };
+}
+
 export async function cancelPurchaseOrder(id){
   const { error } = await supabase.from('purchase_orders').update({ status:'cancelled' }).eq('id', id);
   if(error) throw error;
@@ -63,14 +86,16 @@ export async function closePurchaseOrder(id){
   return data||[];
 }
 
-export async function listTodayPurchaseOrders(){
+export async function listPurchaseOrdersByDate(date){
   const { data, error } = await supabase
     .from('purchase_orders')
     .select('*, partners(id, name), purchase_order_lines(*, products(id, name))')
-    .eq('order_date', todayStr())
+    .eq('order_date', date)
+    .in('status', ['moi','closed'])
     .order('created_at', { ascending:false });
   if(error) throw error;
-  return data||[];
+  // Ẩn đơn nháp rỗng (chưa thêm sản phẩm nào nên tổng tiền = 0) — vẫn giữ trong DB, chỉ không hiện ở danh sách.
+  return (data||[]).filter(o=> (o.purchase_order_lines||[]).reduce((s,l)=> s + l.qty*l.import_price, 0) > 0);
 }
 export async function getPurchaseOrder(id){
   const { data, error } = await supabase

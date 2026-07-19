@@ -1,3 +1,6 @@
+// "Hôm nay" theo giờ Việt Nam (UTC+7), không phải giờ UTC của máy chủ/trình duyệt —
+// quanh nửa đêm giờ VN, ngày UTC vẫn là hôm qua nên phải dịch giờ trước khi lấy ngày.
+export function todayStr(){ return new Date(Date.now() + 7*60*60*1000).toISOString().slice(0,10); }
 export function fmtVND(n){ return Math.round(n||0).toLocaleString('vi-VN') + '₫'; }
 export function fmtDate(d){ return new Date(d).toLocaleDateString('vi-VN',{day:'2-digit',month:'2-digit',year:'numeric'}); }
 export function timeAgo(d){

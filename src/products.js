@@ -8,6 +8,9 @@ import {
   getPartnerHistoryForProduct, setPartnerPrice, deletePartnerPrice,
   searchPartnersByName,
 } from './api/products.js';
+import { findByExactName } from './supabaseClient.js';
+import { addToPartnerDraftOrder, updatePOLine, deletePOLine } from './api/purchaseOrders.js';
+import { notifyPurchaseOrdersChanged } from './purchaseOrdersScreen.js';
 
 let productDraft = null;
 let productPartnerQuery = '';
@@ -154,7 +157,7 @@ function productModalHtml(){
           </div>
           ` : ''}
         </div>
-        ${productDraft.source.type==='partner' ? `<div class="field-note" style="margin-top:-6px; margin-bottom:12px;">Tồn kho hiện tại: ${productDraft.existingStockQty}${productDraft.restockQty>0?` · Sẽ nhập thêm ${productDraft.restockQty} -> tồn kho mới ${productDraft.existingStockQty+productDraft.restockQty}`:''}</div>` : ''}
+        ${productDraft.source.type==='partner' ? `<div class="field-note" style="margin-top:-6px; margin-bottom:12px;">Tồn kho hiện tại: ${productDraft.existingStockQty}${productDraft.restockQty>0?` · Sẽ thêm ${productDraft.restockQty} vào đơn nhập chờ duyệt từ đối tác này — tồn kho chỉ tăng sau khi duyệt đơn ở màn Hàng nhập`:''}</div>` : ''}
         <div class="field-row">
           <div class="field">
             <div class="field-label">Giá bán lẻ</div>
@@ -185,7 +188,7 @@ function productModalHtml(){
           <div class="source-price">${productDraft.id ? fmtVND(productDraft.existingImportPrice) : ''}</div>
         </div>
         ${productCandidatesLoading ? loadingSkeleton(2) : candidates.map(h=>`
-          <div class="source-row ${productDraft.source.type==='partner'&&productDraft.source.partnerId===h.partnerId?'selected':''}" data-action="select-source" data-type="partner" data-partner="${h.partnerId}" data-price="${h.price||0}" data-name="${esc(h.name)}">
+          <div class="source-row ${productDraft.source.type==='partner'&&productDraft.source.partnerId===h.partnerId?'selected':''}" data-action="select-source" data-type="partner" data-partner="${h.partnerId}" data-price="${h.price||0}" data-known="${h.known?1:0}" data-name="${esc(h.name)}">
             <div class="source-left">
               <span class="dot dot-doitac"></span>
               <div>
@@ -251,7 +254,11 @@ export function handleProductModalAction(action, el){
       if(el.dataset.type==='kho'){
         productDraft.source = { type:'kho', price: productDraft.id ? productDraft.existingImportPrice : 0 };
       } else {
-        productDraft.source = { type:'partner', partnerId: el.dataset.partner, price: parseFloat(el.dataset.price) };
+        // Đối tác chưa từng nhập sản phẩm này -> mặc định lấy giá nhập trong kho làm gợi ý,
+        // thay vì để trống/0.
+        const known = el.dataset.known === '1';
+        const price = known ? parseFloat(el.dataset.price) : (productDraft.existingImportPrice||0);
+        productDraft.source = { type:'partner', partnerId: el.dataset.partner, price };
       }
       paintProductModal();
       return true;
@@ -296,7 +303,7 @@ async function commitDeleteProduct(){
   }
 }
 
-function saveProductDraft(){
+async function saveProductDraft(){
   const name = (productDraft.name||'').trim();
   if(!name){
     productDraft.errors = { name:true, any:true };
@@ -304,6 +311,15 @@ function saveProductDraft(){
     return;
   }
   productDraft.errors = {};
+  if(!productDraft.id){
+    try{
+      const dup = await findByExactName('products', name);
+      if(dup){
+        openConfirmModal('Tên sản phẩm đã tồn tại', `Đã có sản phẩm tên "${name}" trong hệ thống. Vẫn muốn tạo thêm sản phẩm trùng tên?`, ()=>commitProductSave());
+        return;
+      }
+    } catch(err){ /* không chặn tạo mới nếu kiểm tra trùng tên bị lỗi mạng */ }
+  }
   commitProductSave();
 }
 
@@ -338,15 +354,16 @@ async function commitProductSave(){
     }
 
     const restockQty = productDraft.restockQty || 0;
-    const beforeStockQty = productDraft.existingStockQty || 0;
+    let poLineResult = null;
     if(productDraft.source.type==='partner' && restockQty > 0){
-      product = await updateProduct(product.id, { stock_qty: beforeStockQty + restockQty });
+      poLineResult = await addToPartnerDraftOrder(productDraft.source.partnerId, product.id, restockQty, productDraft.source.price);
+      notifyPurchaseOrdersChanged();
     }
 
     requestCloseTopModal();
     resetSearchAndRefresh();
 
-    const restockNote = restockQty>0 ? ` Đã nhập thêm ${restockQty} vào kho — tồn kho mới: ${beforeStockQty+restockQty}.` : '';
+    const restockNote = restockQty>0 ? ` Đã thêm ${restockQty} vào đơn nhập chờ duyệt từ đối tác — vào Hàng nhập để duyệt.` : '';
     if(isEdit){
       const beforeFull = productDraft.existingSnapshot;
       showToast(`Đã cập nhật "${name}".${restockNote}`, [], { icon:ICON.check, undo: async ()=>{
@@ -354,8 +371,15 @@ async function commitProductSave(){
           await updateProduct(product.id, {
             name: beforeFull.name, sell_price_retail: beforeFull.sell_price_retail,
             sell_price_wholesale: beforeFull.sell_price_wholesale, import_price: beforeFull.import_price,
-            stock_qty: beforeStockQty,
           });
+          if(poLineResult){
+            if(poLineResult.previousLine){
+              await updatePOLine(poLineResult.previousLine.id, { qty: poLineResult.previousLine.qty, import_price: poLineResult.previousLine.import_price });
+            } else {
+              await deletePOLine(poLineResult.line.id);
+            }
+            notifyPurchaseOrdersChanged();
+          }
           if(productDraft.source.type==='partner'){
             if(beforePartnerPrice) await setPartnerPrice(beforePartnerPrice.partnerId, product.id, beforePartnerPrice.price);
             else await deletePartnerPrice(productDraft.source.partnerId, product.id);

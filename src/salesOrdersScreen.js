@@ -1,13 +1,11 @@
 import { ICON } from './icons.js';
-import { esc, fmtDate, fmtVND, facebookProfileUrl } from './utils.js';
+import { esc, fmtDate, fmtVND, facebookProfileUrl, todayStr } from './utils.js';
 import { openModal, rerenderTopModal, openConfirmModal, loadingSkeleton, emptyState, errorBanner } from './modal.js';
 import { showToast } from './toast.js';
 import {
   listSalesOrdersByDate, getSalesOrder, cancelSalesOrder, closeSalesOrder,
   orderTotal, orderLineProfit, orderProfit,
 } from './api/salesOrders.js';
-
-const todayStr = () => new Date().toISOString().slice(0,10);
 
 let screenWrap = null;
 let selectedDate = todayStr();
