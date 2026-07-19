@@ -3,53 +3,97 @@ import { esc, fmtDate, fmtVND } from './utils.js';
 import { openModal, rerenderTopModal, openConfirmModal, loadingSkeleton, emptyState, errorBanner } from './modal.js';
 import { showToast } from './toast.js';
 import {
-  listTodayPurchaseOrders, getPurchaseOrder, cancelPurchaseOrder, closePurchaseOrder, poTotal,
+  listPurchaseOrdersByDate, getPurchaseOrder, cancelPurchaseOrder, closePurchaseOrder, poTotal,
 } from './api/purchaseOrders.js';
 
+const todayStr = () => new Date().toISOString().slice(0,10);
+
 let screenWrap = null;
-let screenOrders = null;
+let selectedDate = todayStr();
+let partnerQuery = '';
+let dayOrders = null;   // toàn bộ đơn trong ngày đang xem, CHƯA lọc theo tên đối tác
 let screenError = null;
 
 export async function openPurchaseScreen(){
-  screenOrders = null; screenError = null;
+  selectedDate = todayStr();
+  partnerQuery = '';
+  dayOrders = null; screenError = null;
   screenWrap = openModal(screenHtml(true), {});
-  await loadOrders();
+  wireInputs();
+  await loadOrdersForDate();
 }
 
-async function loadOrders(){
+async function loadOrdersForDate(){
+  const myDate = selectedDate;
   try{
-    screenOrders = await listTodayPurchaseOrders();
+    dayOrders = await listPurchaseOrdersByDate(myDate);
+    if(myDate !== selectedDate) return;
     screenError = null;
   } catch(err){
+    if(myDate !== selectedDate) return;
     screenError = err;
   }
-  if(screenWrap && screenWrap.isConnected){
-    rerenderTopModal(screenHtml(false));
-  }
+  if(screenWrap?.isConnected){ rerenderTopModal(screenHtml(false)); wireInputs(); }
 }
 
 export function notifyPurchaseOrdersChanged(){
   if(screenWrap && screenWrap.isConnected && document.body.contains(screenWrap)){
-    loadOrders();
+    loadOrdersForDate();
   }
 }
 
+function filteredOrders(){
+  const q = partnerQuery.trim().toLowerCase();
+  if(!q || !dayOrders) return dayOrders||[];
+  return dayOrders.filter(o=> (o.partners?.name||'').toLowerCase().includes(q));
+}
+function totalByStatus(status){
+  if(!dayOrders) return 0;
+  return dayOrders.filter(o=>o.status===status)
+    .reduce((s,o)=> s + (o.purchase_order_lines||[]).reduce((s2,l)=> s2 + l.qty*l.import_price, 0), 0);
+}
+
 function screenHtml(loading){
-  const count = screenOrders ? screenOrders.length : 0;
+  const filtered = filteredOrders();
+  const count = dayOrders ? filtered.length : 0;
   return `
     <div class="modal-handle"></div>
     <div class="modal-head">
       <div style="display:flex; align-items:center; gap:8px;">
         <div class="icon-btn" data-action="close-modal">${ICON.close}</div>
-        <div class="modal-title">Hàng nhập hôm nay</div>
+        <div class="modal-title">Hàng nhập</div>
       </div>
       <div style="font-size:12px; color:var(--ink-faint); font-weight:600;">${loading?'':count+' đơn'}</div>
     </div>
     <div class="modal-body" style="padding-left:0; padding-right:0;">
-      ${loading ? `<div style="padding:0 18px;">${loadingSkeleton(3)}</div>`
-        : screenError ? errorBanner('Không tải được danh sách đơn mua — kiểm tra lại kết nối mạng.', { retryAction:'retry-purchase-screen' })
-        : screenOrders.length ? screenOrders.map(o=>renderPOCard(o)).join('')
-        : emptyState('Chưa có đơn mua nào hôm nay', 'Tạo đơn bằng cách chạm vào một đối tác ở màn hình chính.')}
+      <div style="padding:0 16px;">
+        <div class="card" style="margin-bottom:12px;">
+          <div class="field">
+            <div class="field-label">Ngày</div>
+            <input class="input" type="date" id="po-date" value="${selectedDate}">
+          </div>
+          <div class="field">
+            <div class="field-label">Tìm đối tác trong ngày</div>
+            <div class="search-box">${ICON.search}<input id="po-partner-search" placeholder="Gõ tên đối tác…" value="${esc(partnerQuery)}" autocomplete="off"></div>
+          </div>
+          <div class="field-row" style="margin-bottom:0;">
+            <div class="field" style="margin-bottom:0;">
+              <div class="field-label">Tổng tiền chưa chốt</div>
+              <div class="readonly-field" style="font-weight:800; font-family:'Sora';">${loading?'…':fmtVND(totalByStatus('moi'))}</div>
+            </div>
+            <div class="field" style="margin-bottom:0;">
+              <div class="field-label">Tổng tiền đã chốt</div>
+              <div class="readonly-field" style="font-weight:800; font-family:'Sora';">${loading?'…':fmtVND(totalByStatus('closed'))}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="po-list">
+        ${loading ? `<div style="padding:0 16px;">${loadingSkeleton(3)}</div>`
+          : screenError ? errorBanner('Không tải được danh sách đơn mua — kiểm tra lại kết nối mạng.', { retryAction:'retry-purchase-screen' })
+          : filtered.length ? filtered.map(o=>renderPOCard(o)).join('')
+          : emptyState('Không có đơn mua nào', partnerQuery.trim() ? 'Không tìm thấy đối tác phù hợp trong ngày này.' : 'Tạo đơn bằng cách chạm vào một đối tác ở màn hình chính.')}
+      </div>
     </div>
   `;
 }
@@ -80,6 +124,30 @@ function renderPOCard(o){
       </div>` : ''}
     </div>
   </div>`;
+}
+
+function wireInputs(){
+  if(!screenWrap?.isConnected) return;
+  const dateEl = screenWrap.querySelector('#po-date');
+  if(dateEl) dateEl.addEventListener('change', e=>{
+    selectedDate = e.target.value || todayStr();
+    dayOrders = null;
+    rerenderTopModal(screenHtml(true));
+    wireInputs();
+    loadOrdersForDate();
+  });
+  const searchEl = screenWrap.querySelector('#po-partner-search');
+  if(searchEl) searchEl.addEventListener('input', e=>{
+    partnerQuery = e.target.value;
+    const listEl = screenWrap.querySelector('#po-list');
+    if(listEl){
+      const filtered = filteredOrders();
+      listEl.innerHTML = filtered.length ? filtered.map(o=>renderPOCard(o)).join('')
+        : emptyState('Không có đơn mua nào', partnerQuery.trim() ? 'Không tìm thấy đối tác phù hợp trong ngày này.' : 'Tạo đơn bằng cách chạm vào một đối tác ở màn hình chính.');
+    }
+    const headCount = screenWrap.querySelector('.modal-head > div:last-child');
+    if(headCount) headCount.textContent = filteredOrders().length+' đơn';
+  });
 }
 
 async function viewPODetail(id){
@@ -127,7 +195,7 @@ async function viewPODetail(id){
 async function closePOFromList(id){
   try{
     const diffs = await closePurchaseOrder(id);
-    await loadOrders();
+    await loadOrdersForDate();
     if(diffs && diffs.length){
       const warnings = diffs.map(d=>{
         if(d.diff_type==='bu_thieu'){
@@ -149,7 +217,7 @@ function confirmCancelPOFromList(id, name){
   openConfirmModal('Hủy đơn hàng?', `Bạn có chắc muốn hủy đơn mua từ "${esc(name||'đối tác này')}" không? Không thể hoàn tác thao tác này.`, async ()=>{
     try{
       await cancelPurchaseOrder(id);
-      await loadOrders();
+      await loadOrdersForDate();
     } catch(err){
       showToast('Không hủy được đơn hàng — kiểm tra lại kết nối mạng.', []);
     }
@@ -161,7 +229,7 @@ export function handlePurchaseScreenAction(action, el){
     case 'view-po-detail': viewPODetail(el.dataset.id); return true;
     case 'close-po-list': closePOFromList(el.dataset.id); return true;
     case 'cancel-po-list': confirmCancelPOFromList(el.dataset.id, el.dataset.name); return true;
-    case 'retry-purchase-screen': loadOrders(); return true;
+    case 'retry-purchase-screen': loadOrdersForDate(); return true;
   }
   return false;
 }

@@ -63,14 +63,16 @@ export async function closePurchaseOrder(id){
   return data||[];
 }
 
-export async function listTodayPurchaseOrders(){
+export async function listPurchaseOrdersByDate(date){
   const { data, error } = await supabase
     .from('purchase_orders')
     .select('*, partners(id, name), purchase_order_lines(*, products(id, name))')
-    .eq('order_date', todayStr())
+    .eq('order_date', date)
+    .in('status', ['moi','closed'])
     .order('created_at', { ascending:false });
   if(error) throw error;
-  return data||[];
+  // Ẩn đơn nháp rỗng (chưa thêm sản phẩm nào nên tổng tiền = 0) — vẫn giữ trong DB, chỉ không hiện ở danh sách.
+  return (data||[]).filter(o=> (o.purchase_order_lines||[]).reduce((s,l)=> s + l.qty*l.import_price, 0) > 0);
 }
 export async function getPurchaseOrder(id){
   const { data, error } = await supabase
