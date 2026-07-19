@@ -47,10 +47,9 @@ function filteredOrders(){
   if(!q || !dayOrders) return dayOrders||[];
   return dayOrders.filter(o=> (o.partners?.name||'').toLowerCase().includes(q));
 }
-function totalByStatus(status){
+function dayTotal(){
   if(!dayOrders) return 0;
-  return dayOrders.filter(o=>o.status===status)
-    .reduce((s,o)=> s + (o.purchase_order_lines||[]).reduce((s2,l)=> s2 + l.qty*l.import_price, 0), 0);
+  return dayOrders.reduce((s,o)=> s + (o.purchase_order_lines||[]).reduce((s2,l)=> s2 + l.qty*l.import_price, 0), 0);
 }
 
 function screenHtml(loading){
@@ -76,15 +75,9 @@ function screenHtml(loading){
             <div class="field-label">Tìm đối tác trong ngày</div>
             <div class="search-box">${ICON.search}<input id="po-partner-search" placeholder="Gõ tên đối tác…" value="${esc(partnerQuery)}" autocomplete="off"></div>
           </div>
-          <div class="field-row" style="margin-bottom:0;">
-            <div class="field" style="margin-bottom:0;">
-              <div class="field-label">Tổng tiền chưa chốt</div>
-              <div class="readonly-field" style="font-weight:800; font-family:'Sora';">${loading?'…':fmtVND(totalByStatus('moi'))}</div>
-            </div>
-            <div class="field" style="margin-bottom:0;">
-              <div class="field-label">Tổng tiền đã chốt</div>
-              <div class="readonly-field" style="font-weight:800; font-family:'Sora';">${loading?'…':fmtVND(totalByStatus('closed'))}</div>
-            </div>
+          <div class="field" style="margin-bottom:0;">
+            <div class="field-label">Tổng tiền mua từ đối tác</div>
+            <div class="readonly-field" style="font-weight:800; font-family:'Sora';">${loading?'…':fmtVND(dayTotal())}</div>
           </div>
         </div>
       </div>
