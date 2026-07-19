@@ -269,6 +269,7 @@ button{font-family:'Inter'; cursor:pointer; border:none; outline:none;}
 .round-btn{width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center;}
 .round-btn.call{background:#E7F4EE; color:var(--kho);}
 .round-btn.zalo{background:#E4F0FB; color:#0B72D6; font-family:'Sora'; font-weight:800; font-size:12px;}
+.round-btn.facebook{background:#E8EEFC; color:#1877F2;}
 
 /* ---------- Order line rows ---------- */
 .line-row{

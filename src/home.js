@@ -189,7 +189,7 @@ function renderBottomIcons(loading){
       ${c.soToday?`<div class="wide-tile-badge">${c.soToday}</div>`:''}
       <div class="wide-tile-icon">${ICON.receipt}</div>
       <div class="wide-tile-text">
-        <div class="wide-tile-label">Đơn bán hôm nay</div>
+        <div class="wide-tile-label">Đơn bán</div>
         <div class="wide-tile-sub">Quản lý & chốt đơn</div>
       </div>
     </div>

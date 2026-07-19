@@ -41,10 +41,10 @@ export async function openCustomerModal(idOrNull){
     latestImportMap = importMap;
 
     if(isNewCustomer){
-      customerDraft = { name: searchQuery || '', phone:'', address:'', type:'le', errors:{} };
+      customerDraft = { name: searchQuery || '', phone:'', address:'', facebookId:'', type:'le', errors:{} };
     } else {
       const cust = await getCustomer(customerId);
-      customerDraft = { name:cust.name, phone:cust.phone||'', address:cust.address||'', type:cust.customer_type, errors:{} };
+      customerDraft = { name:cust.name, phone:cust.phone||'', address:cust.address||'', facebookId:cust.facebook_id||'', type:cust.customer_type, errors:{} };
       soRecord = await getOrCreateDraftSO(customerId);
       soLines = await listSOLines(soRecord.id);
     }
@@ -69,6 +69,7 @@ async function commitNewCustomer(typedName){
       name: typedName,
       phone: (customerDraft.phone||'').trim(),
       address: (customerDraft.address||'').trim(),
+      facebook_id: (customerDraft.facebookId||'').trim(),
       customer_type: customerDraft.type,
     });
     if(localDraftLines.length){
@@ -165,6 +166,17 @@ function customerModalHtml(){
             <a class="round-btn zalo" href="https://zalo.me/${d.phone}" target="_blank" rel="noopener">Z</a>
           </div>` : ''}
         </div>
+        <div class="field-row">
+          <div class="field">
+            <div class="field-label">ID / link Facebook</div>
+            <input class="input" id="cf-facebook" value="${esc(d.facebookId)}" placeholder="VD: nguyen.van.a hoặc 100012345678 (không bắt buộc)">
+            <div class="field-note">Dùng để mở Messenger gửi bill từ màn Đơn bán.</div>
+          </div>
+          ${canCall && d.facebookId ? `
+          <div style="display:flex; align-items:flex-end; padding-bottom:1px;">
+            <a class="round-btn facebook" href="https://m.me/${esc(d.facebookId)}" target="_blank" rel="noopener">${ICON.facebook}</a>
+          </div>` : ''}
+        </div>
         <div class="field">
           <div class="field-label">Địa chỉ</div>
           <input class="input" id="cf-address" value="${esc(d.address)}" placeholder="Không bắt buộc">
@@ -259,6 +271,7 @@ function wireInputs(){
   const byId = id=>document.getElementById(id);
   const nameEl = byId('cf-name'); if(nameEl) nameEl.addEventListener('input', e=>{ customerDraft.name = e.target.value; });
   const phoneEl = byId('cf-phone'); if(phoneEl) phoneEl.addEventListener('input', e=>{ customerDraft.phone = e.target.value; });
+  const fbEl = byId('cf-facebook'); if(fbEl) fbEl.addEventListener('input', e=>{ customerDraft.facebookId = e.target.value; });
   const addrEl = byId('cf-address'); if(addrEl) addrEl.addEventListener('input', e=>{ customerDraft.address = e.target.value; });
   const qaEl = byId('qa-search');
   if(qaEl) qaEl.addEventListener('input', e=>{
@@ -436,13 +449,14 @@ async function commitCustomerSave(){
   try{
     const before = await getCustomer(customerId);
     const updated = await updateCustomer(customerId, {
-      name: d.name.trim(), phone: d.phone.trim(), address: d.address.trim(), customer_type: d.type,
+      name: d.name.trim(), phone: d.phone.trim(), address: d.address.trim(),
+      facebook_id: d.facebookId.trim(), customer_type: d.type,
     });
     requestCloseTopModal();
     resetSearchAndRefresh();
     showToast(`Đã cập nhật "${updated.name}".`, [], { icon:ICON.check, undo: async ()=>{
       try{
-        await updateCustomer(customerId, { name:before.name, phone:before.phone, address:before.address, customer_type:before.customer_type });
+        await updateCustomer(customerId, { name:before.name, phone:before.phone, address:before.address, facebook_id:before.facebook_id, customer_type:before.customer_type });
         resetSearchAndRefresh();
         showToast(`Đã hoàn tác thay đổi cho "${before.name}".`, []);
       } catch(err){

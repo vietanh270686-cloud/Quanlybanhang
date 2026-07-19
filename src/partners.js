@@ -39,7 +39,7 @@ export async function openPartnerModal(idOrNull){
     quickAddProducts = await searchProductsByName('');
 
     if(isNewPartner){
-      partnerDraft = { name:'', seller1:{name:'',phone:''}, seller2:{name:'',phone:''}, address:'', errors:{} };
+      partnerDraft = { name:'', seller1:{name:'',phone:''}, seller2:{name:'',phone:''}, address:'', facebookId:'', errors:{} };
     } else {
       const partner = await getPartner(partnerId);
       const c1 = (partner.partner_contacts||[]).find(c=>c.seq===1) || {name:'',phone:''};
@@ -49,6 +49,7 @@ export async function openPartnerModal(idOrNull){
         seller1: { name:c1.name||'', phone:c1.phone||'' },
         seller2: { name:c2.name||'', phone:c2.phone||'' },
         address: partner.address||'',
+        facebookId: partner.facebook_id||'',
         errors: {},
       };
       const hist = await getProductHistoryForPartner(partnerId);
@@ -72,7 +73,7 @@ function onPartnerModalClose(){
 
 async function commitNewPartner(typedName){
   try{
-    const newPartner = await createPartner({ name: typedName, address:(partnerDraft.address||'').trim() });
+    const newPartner = await createPartner({ name: typedName, address:(partnerDraft.address||'').trim(), facebook_id:(partnerDraft.facebookId||'').trim() });
     await Promise.all([
       upsertPartnerContact(newPartner.id, 1, { name:(partnerDraft.seller1.name||'').trim(), phone:(partnerDraft.seller1.phone||'').trim() }),
       upsertPartnerContact(newPartner.id, 2, { name:(partnerDraft.seller2.name||'').trim(), phone:(partnerDraft.seller2.phone||'').trim() }),
@@ -175,6 +176,17 @@ function partnerModalHtml(){
           <div class="field-label">Địa chỉ</div>
           <input class="input" id="ptf-address" value="${esc(d.address)}" placeholder="Không bắt buộc">
         </div>
+        <div class="field-row">
+          <div class="field">
+            <div class="field-label">ID / link Facebook</div>
+            <input class="input" id="ptf-facebook" value="${esc(d.facebookId)}" placeholder="VD: nguyen.van.a hoặc 100012345678 (không bắt buộc)">
+            <div class="field-note">Dùng để mở Messenger gửi bill từ màn Đơn bán.</div>
+          </div>
+          ${canCall && d.facebookId ? `
+          <div style="display:flex; align-items:flex-end; padding-bottom:1px;">
+            <a class="round-btn facebook" href="https://m.me/${esc(d.facebookId)}" target="_blank" rel="noopener">${ICON.facebook}</a>
+          </div>` : ''}
+        </div>
       </div>
 
       ${demandEntries.length ? `
@@ -264,6 +276,7 @@ function wireInputs(){
     'ptf-s2-name': v=>partnerDraft.seller2.name = v,
     'ptf-s2-phone': v=>partnerDraft.seller2.phone = v,
     'ptf-address': v=>partnerDraft.address = v,
+    'ptf-facebook': v=>partnerDraft.facebookId = v,
   };
   Object.keys(map).forEach(id=>{
     const el = byId(id);
@@ -415,7 +428,7 @@ async function commitPartnerSave(){
     const beforeC1 = (before.partner_contacts||[]).find(c=>c.seq===1) || {name:'',phone:''};
     const beforeC2 = (before.partner_contacts||[]).find(c=>c.seq===2) || {name:'',phone:''};
 
-    const updated = await updatePartner(partnerId, { name:d.name.trim(), address:d.address.trim() });
+    const updated = await updatePartner(partnerId, { name:d.name.trim(), address:d.address.trim(), facebook_id:d.facebookId.trim() });
     await Promise.all([
       upsertPartnerContact(partnerId, 1, { name:d.seller1.name.trim(), phone:d.seller1.phone.trim() }),
       upsertPartnerContact(partnerId, 2, { name:d.seller2.name.trim(), phone:d.seller2.phone.trim() }),
@@ -425,7 +438,7 @@ async function commitPartnerSave(){
     resetSearchAndRefresh();
     showToast(`Đã cập nhật "${updated.name}".`, [], { icon:ICON.check, undo: async ()=>{
       try{
-        await updatePartner(partnerId, { name:before.name, address:before.address });
+        await updatePartner(partnerId, { name:before.name, address:before.address, facebook_id:before.facebook_id });
         await Promise.all([
           upsertPartnerContact(partnerId, 1, { name:beforeC1.name||'', phone:beforeC1.phone||'' }),
           upsertPartnerContact(partnerId, 2, { name:beforeC2.name||'', phone:beforeC2.phone||'' }),

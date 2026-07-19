@@ -4,7 +4,7 @@ import { fmtVND } from './utils.js';
 import { openModal, rerenderTopModal, openConfirmModal, loadingSkeleton, emptyState, errorBanner } from './modal.js';
 import { showToast } from './toast.js';
 import {
-  listTodaySalesOrders, getSalesOrder, cancelSalesOrder, closeSalesOrder,
+  listSalesOrders, getSalesOrder, cancelSalesOrder, closeSalesOrder,
   orderTotal, orderLineProfit, orderProfit,
 } from './api/salesOrders.js';
 
@@ -20,7 +20,7 @@ export async function openSalesScreen(){
 
 async function loadOrders(){
   try{
-    screenOrders = await listTodaySalesOrders();
+    screenOrders = await listSalesOrders();
     screenError = null;
   } catch(err){
     screenError = err;
@@ -43,7 +43,7 @@ function screenHtml(loading){
     <div class="modal-head">
       <div style="display:flex; align-items:center; gap:8px;">
         <div class="icon-btn" data-action="close-modal">${ICON.close}</div>
-        <div class="modal-title">Đơn bán hôm nay</div>
+        <div class="modal-title">Đơn bán</div>
       </div>
       <div style="font-size:12px; color:var(--ink-faint); font-weight:600;">${loading?'':count+' đơn'}</div>
     </div>
@@ -51,13 +51,15 @@ function screenHtml(loading){
       ${loading ? `<div style="padding:0 18px;">${loadingSkeleton(3)}</div>`
         : screenError ? errorBanner('Không tải được danh sách đơn bán — kiểm tra lại kết nối mạng.', { retryAction:'retry-sales-screen' })
         : screenOrders.length ? screenOrders.map(o=>renderSOCard(o)).join('')
-        : emptyState('Chưa có đơn bán nào hôm nay', 'Tạo đơn bằng cách chạm vào một khách hàng ở màn hình chính.')}
+        : emptyState('Chưa có đơn bán nào', 'Tạo đơn bằng cách chạm vào một khách hàng ở màn hình chính.')}
     </div>
   `;
 }
 
 function renderSOCard(o){
   const custName = o.customers?.name || '';
+  const phone = o.customers?.phone;
+  const facebookId = o.customers?.facebook_id;
   const lines = o.sales_order_lines || [];
   const total = lines.reduce((s,l)=> s + l.qty*l.sell_price, 0);
   const profit = lines.reduce((s,l)=> s + (l.sell_price - l.import_price_at_sale)*l.qty, 0);
@@ -68,7 +70,11 @@ function renderSOCard(o){
         <div class="order-card-title">${esc(custName)}</div>
         <div class="order-card-date">${fmtDate(o.order_date)} · ${lines.length} sản phẩm</div>
       </div>
-      <div class="status-chip status-${o.status==='moi'?'moi':o.status==='closed'?'closed':'cancelled'}">${o.status==='moi'?'Mới':o.status==='closed'?'Đã chốt':'Đã hủy'}</div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        ${phone?`<button type="button" class="round-btn zalo" style="width:28px; height:28px;" data-action="send-bill" data-id="${o.id}" data-channel="zalo" title="Gửi bill qua Zalo">Z</button>`:''}
+        ${facebookId?`<button type="button" class="round-btn facebook" style="width:28px; height:28px;" data-action="send-bill" data-id="${o.id}" data-channel="facebook" title="Gửi bill qua Messenger">${ICON.facebook}</button>`:''}
+        <div class="status-chip status-${o.status==='moi'?'moi':o.status==='closed'?'closed':'cancelled'}">${o.status==='moi'?'Mới':o.status==='closed'?'Đã chốt':'Đã hủy'}</div>
+      </div>
     </div>
     ${lines.map(l=>`<div class="order-line-mini">
         <div class="l"><span class="dot ${l.source_type==='kho'?'dot-kho':'dot-doitac'}"></span><span class="nm">${esc(l.products?.name)} ×${l.qty}</span></div>
@@ -86,6 +92,29 @@ function renderSOCard(o){
       </div>` : ''}
     </div>
   </div>`;
+}
+
+function buildBillText(o){
+  const custName = o.customers?.name || '';
+  const lines = o.sales_order_lines || [];
+  const total = lines.reduce((s,l)=> s + l.qty*l.sell_price, 0);
+  const body = lines.map(l=>`${l.products?.name} × ${l.qty} = ${fmtVND(l.qty*l.sell_price)}`).join('\n');
+  return `HÓA ĐƠN — ${custName}\nNgày: ${fmtDate(o.order_date)}\n\n${body}\n\nTổng cộng: ${fmtVND(total)}`;
+}
+async function sendBill(id, channel){
+  const o = (screenOrders||[]).find(x=>x.id===id);
+  if(!o) return;
+  try{
+    await navigator.clipboard.writeText(buildBillText(o));
+    showToast('Đã copy nội dung bill — dán vào khung chat.', []);
+  } catch(err){
+    showToast('Không copy được nội dung bill — anh soạn tay giúp.', []);
+  }
+  if(channel==='zalo' && o.customers?.phone){
+    window.open(`https://zalo.me/${o.customers.phone}`, '_blank', 'noopener');
+  } else if(channel==='facebook' && o.customers?.facebook_id){
+    window.open(`https://m.me/${o.customers.facebook_id}`, '_blank', 'noopener');
+  }
 }
 
 async function viewSODetail(id){
@@ -167,6 +196,7 @@ export function handleSalesScreenAction(action, el){
     case 'close-so-list': closeSOFromList(el.dataset.id); return true;
     case 'cancel-so-list': confirmCancelSOFromList(el.dataset.id, el.dataset.name); return true;
     case 'retry-sales-screen': loadOrders(); return true;
+    case 'send-bill': sendBill(el.dataset.id, el.dataset.channel); return true;
   }
   return false;
 }

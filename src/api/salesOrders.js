@@ -67,12 +67,12 @@ export async function closeSalesOrder(id){
   if(error) throw error;
 }
 
-export async function listTodaySalesOrders(){
+export async function listSalesOrders(){
   const { data, error } = await supabase
     .from('sales_orders')
-    .select('*, customers(id, name), sales_order_lines(*, products(id, name))')
-    .eq('order_date', todayStr())
-    .order('created_at', { ascending:false });
+    .select('*, customers(id, name, phone, facebook_id), sales_order_lines(*, products(id, name))')
+    .order('created_at', { ascending:false })
+    .limit(200);
   if(error) throw error;
   return data||[];
 }
