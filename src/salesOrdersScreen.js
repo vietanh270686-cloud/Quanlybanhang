@@ -71,6 +71,7 @@ function renderSOCard(o){
         <div class="order-card-date">${fmtDate(o.order_date)} · ${lines.length} sản phẩm</div>
       </div>
       <div style="display:flex; align-items:center; gap:8px;">
+        <button type="button" class="round-btn" style="width:28px; height:28px; background:var(--line-soft); color:var(--ink-soft);" data-action="copy-bill" data-id="${o.id}" title="Copy nội dung bill">${ICON.copy}</button>
         ${phone?`<button type="button" class="round-btn zalo" style="width:28px; height:28px;" data-action="send-bill" data-id="${o.id}" data-channel="zalo" title="Gửi bill qua Zalo">Z</button>`:''}
         ${facebookId?`<button type="button" class="round-btn facebook" style="width:28px; height:28px;" data-action="send-bill" data-id="${o.id}" data-channel="facebook" title="Gửi bill qua Messenger">${ICON.facebook}</button>`:''}
         <div class="status-chip status-${o.status==='moi'?'moi':o.status==='closed'?'closed':'cancelled'}">${o.status==='moi'?'Mới':o.status==='closed'?'Đã chốt':'Đã hủy'}</div>
@@ -94,27 +95,39 @@ function renderSOCard(o){
   </div>`;
 }
 
+const BANK_INFO = 'STK: 1282666675 — Ngân hàng BIDV, Chi nhánh Tràng Tiền, Hà Nội';
+
 function buildBillText(o){
   const custName = o.customers?.name || '';
   const lines = o.sales_order_lines || [];
   const total = lines.reduce((s,l)=> s + l.qty*l.sell_price, 0);
   const body = lines.map(l=>`${l.products?.name} × ${l.qty} = ${fmtVND(l.qty*l.sell_price)}`).join('\n');
-  return `HÓA ĐƠN — ${custName}\nNgày: ${fmtDate(o.order_date)}\n\n${body}\n\nTổng cộng: ${fmtVND(total)}`;
+  return `HÓA ĐƠN — ${custName}\nNgày: ${fmtDate(o.order_date)}\n\n${body}\n\nTổng cộng: ${fmtVND(total)}\n\nThông tin chuyển khoản:\n${BANK_INFO}`;
 }
-async function sendBill(id, channel){
+
+async function copyBillText(id){
   const o = (screenOrders||[]).find(x=>x.id===id);
   if(!o) return;
   try{
     await navigator.clipboard.writeText(buildBillText(o));
-    showToast('Đã copy nội dung bill — dán vào khung chat.', []);
+    showToast('Đã copy nội dung bill.', []);
   } catch(err){
     showToast('Không copy được nội dung bill — anh soạn tay giúp.', []);
   }
+}
+
+// Mở cửa sổ Zalo/Messenger NGAY trong lúc bấm (đồng bộ) — nếu chờ copy clipboard
+// (bất đồng bộ) xong mới mở thì nhiều trình duyệt di động sẽ chặn popup vì không còn
+// tính là hành động trực tiếp của người dùng nữa.
+function sendBill(id, channel){
+  const o = (screenOrders||[]).find(x=>x.id===id);
+  if(!o) return;
   if(channel==='zalo' && o.customers?.phone){
     window.open(`https://zalo.me/${o.customers.phone}`, '_blank', 'noopener');
   } else if(channel==='facebook' && o.customers?.facebook_id){
     window.open(`https://m.me/${o.customers.facebook_id}`, '_blank', 'noopener');
   }
+  copyBillText(id);
 }
 
 async function viewSODetail(id){
@@ -197,6 +210,7 @@ export function handleSalesScreenAction(action, el){
     case 'cancel-so-list': confirmCancelSOFromList(el.dataset.id, el.dataset.name); return true;
     case 'retry-sales-screen': loadOrders(); return true;
     case 'send-bill': sendBill(el.dataset.id, el.dataset.channel); return true;
+    case 'copy-bill': copyBillText(el.dataset.id); return true;
   }
   return false;
 }

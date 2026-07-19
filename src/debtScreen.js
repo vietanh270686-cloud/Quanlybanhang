@@ -3,7 +3,7 @@ import { esc, fmtVND, fmtDateInputToVN } from './utils.js';
 import { openModal, rerenderTopModal, openConfirmModal, loadingSkeleton, errorBanner } from './modal.js';
 import { showToast } from './toast.js';
 import {
-  listDebtEntities, recordPayment, revertPayment, recordAdjustment, revertAdjustment,
+  listDebtEntities, getDebtGrandTotal, recordPayment, revertPayment, recordAdjustment, revertAdjustment,
 } from './api/debt.js';
 
 const DEBT_CONFIRM_THRESHOLD = 2000000;
@@ -14,6 +14,7 @@ let debtQuery = '';
 let selectedDebtId = null;
 let debtForm = null;
 let entities = [];
+let grandTotal = 0;
 let entitiesLoading = true;
 let entitiesError = null;
 
@@ -23,25 +24,28 @@ export async function openDebtScreen(){
   selectedDebtId = null;
   debtForm = null;
   entities = [];
+  grandTotal = 0;
   entitiesLoading = true;
   entitiesError = null;
   screenWrap = openModal(screenHtml(), {});
   await loadEntities();
 }
 
-function filteredEntities(){
-  const q = debtQuery.trim().toLowerCase();
-  if(!q) return entities;
-  return entities.filter(e=> e.name.toLowerCase().includes(q) || (e.phone||'').includes(q));
-}
-
 async function loadEntities(){
   entitiesLoading = true;
   refresh();
+  const myTab = debtTab, myQuery = debtQuery;
   try{
-    entities = await listDebtEntities(debtTab);
+    const [list, total] = await Promise.all([
+      listDebtEntities(myTab, myQuery),
+      getDebtGrandTotal(myTab),
+    ]);
+    if(myTab !== debtTab || myQuery !== debtQuery) return; // đã đổi tab/gõ tiếp, bỏ kết quả cũ
+    entities = list;
+    grandTotal = total;
     entitiesError = null;
   } catch(err){
+    if(myTab !== debtTab || myQuery !== debtQuery) return;
     entitiesError = err;
   }
   entitiesLoading = false;
@@ -55,11 +59,10 @@ function refresh(){
 }
 
 function screenHtml(){
-  const total = entities.reduce((s,e)=>s+(e.debt||0), 0);
-  const filteredList = filteredEntities();
   const selected = selectedDebtId ? entities.find(e=>e.id===selectedDebtId) : null;
   const label = debtTab==='customer' ? 'khách hàng' : 'đối tác';
   const errors = (debtForm&&debtForm.errors) || {};
+  const isSearching = !!debtQuery.trim();
 
   return `
     <div class="modal-handle"></div>
@@ -68,7 +71,7 @@ function screenHtml(){
         <div class="icon-btn" data-action="close-modal">${ICON.close}</div>
         <div class="modal-title">Quản lý công nợ</div>
       </div>
-      <div style="font-size:12px; color:var(--ink-faint); font-weight:600;">${entitiesLoading?'':entities.length+' đang nợ'}</div>
+      <div style="font-size:12px; color:var(--ink-faint); font-weight:600;">${entitiesLoading?'':entities.length+(isSearching?' kết quả':' đang nợ')}</div>
     </div>
     <div class="modal-body" style="padding-left:0; padding-right:0;">
       <div class="debt-tab-row">
@@ -76,18 +79,18 @@ function screenHtml(){
         <div class="debt-tab-btn ${debtTab==='partner'?'active':''}" data-action="set-debt-tab" data-tab="partner">Công nợ Đối tác</div>
       </div>
 
+      <div class="search-box" style="margin:0 16px 12px;">${ICON.search}<input id="debt-search" placeholder="Tìm toàn bộ ${label}…" value="${esc(debtQuery)}" autocomplete="off"></div>
+
       ${entitiesLoading ? `<div style="padding:0 16px;">${loadingSkeleton(3)}</div>`
         : entitiesError ? errorBanner('Không tải được danh sách công nợ — kiểm tra lại kết nối mạng.', { retryAction:'retry-debt-screen' })
         : `
-      <div class="search-box" style="margin:0 16px 12px;">${ICON.search}<input id="debt-search" placeholder="Tìm ${label} đang nợ…" value="${esc(debtQuery)}" autocomplete="off"></div>
-
       <div class="debt-total-bar">
         <div class="debt-total-label">Tổng ${debtTab==='customer'?'khách hàng đang nợ':'tiền đang nợ đối tác'}</div>
-        <div class="debt-total-value">${fmtVND(total)}</div>
+        <div class="debt-total-value">${fmtVND(grandTotal)}</div>
       </div>
 
       <div class="debt-list">
-        ${filteredList.length ? filteredList.map(e=>`
+        ${entities.length ? entities.map(e=>`
           <div class="debt-row ${selectedDebtId===e.id?'selected':''}" data-action="select-debt-entity" data-id="${e.id}">
             <div>
               <div class="debt-row-name">${esc(e.name)}</div>
@@ -95,7 +98,7 @@ function screenHtml(){
             </div>
             <div class="debt-row-amount">${fmtVND(e.debt)}</div>
           </div>
-        `).join('') : `<div class="field-note" style="padding:16px;">${entities.length ? 'Không tìm thấy '+label+' phù hợp.' : 'Không có '+label+' nào đang nợ.'}</div>`}
+        `).join('') : `<div class="field-note" style="padding:16px;">${isSearching ? 'Không tìm thấy '+label+' phù hợp.' : 'Không có '+label+' nào đang nợ.'}</div>`}
       </div>
 
       ${selected ? `
@@ -108,7 +111,7 @@ function screenHtml(){
         <div class="field">
           <div class="field-label">Số tiền nợ</div>
           <input class="input" type="number" id="debt-amount" value="${debtForm.debtAmount}">
-          <div class="field-note">Sửa số này để điều chỉnh trực tiếp công nợ (VD: đối chiếu lại sổ sách).</div>
+          <div class="field-note">Sửa số này để điều chỉnh trực tiếp công nợ (VD: đối chiếu lại sổ sách, hoặc ghi nợ mới).</div>
         </div>
         <div class="field-row">
           <div class="field">
@@ -141,7 +144,9 @@ function wireInputs(){
   if(s){
     s.addEventListener('input', e=>{
       debtQuery = e.target.value;
-      refresh();
+      selectedDebtId = null;
+      debtForm = null;
+      loadEntities();
       const fresh = document.getElementById('debt-search');
       if(fresh){ fresh.focus(); fresh.setSelectionRange(fresh.value.length, fresh.value.length); }
     });
@@ -208,11 +213,13 @@ async function commitDebtPayment(entityId, amount, isoDate){
   try{
     const { updated, log } = await recordPayment(debtTab, entityId, amount, isoDate, before);
     entity.debt = updated.debt;
+    grandTotal += (updated.debt - before);
     debtForm = { debtAmount: entity.debt, paymentAmount:'', paymentDate:'', errors:{} };
     paintWithInputs();
     showToast(`Đã ghi nhận thanh toán ${fmtVND(amount)} cho "${entity.name}".`, [], { icon:ICON.check, undo: async ()=>{
       try{
         await revertPayment(debtTab, entityId, before, log.id);
+        grandTotal += (before - entity.debt);
         entity.debt = before;
         if(selectedDebtId===entityId) debtForm = { debtAmount:entity.debt, paymentAmount:'', paymentDate:'', errors:{} };
         paintWithInputs();
@@ -232,11 +239,13 @@ async function commitDebtAdjustment(entityId, newDebt){
   try{
     const { updated, log } = await recordAdjustment(debtTab, entityId, newDebt, before);
     entity.debt = updated.debt;
+    grandTotal += (updated.debt - before);
     debtForm.debtAmount = entity.debt;
     paintWithInputs();
     showToast(`Đã cập nhật công nợ của "${entity.name}" thành ${fmtVND(newDebt)}.`, [], { icon:ICON.check, undo: async ()=>{
       try{
         await revertAdjustment(debtTab, entityId, before, log.id);
+        grandTotal += (before - entity.debt);
         entity.debt = before;
         if(selectedDebtId===entityId) debtForm.debtAmount = entity.debt;
         paintWithInputs();
