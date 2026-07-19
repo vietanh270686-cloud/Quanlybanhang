@@ -1,5 +1,5 @@
 import { ICON } from './icons.js';
-import { esc, fmtVND } from './utils.js';
+import { esc, fmtVND, facebookProfileUrl } from './utils.js';
 import { openModal, rerenderTopModal, requestCloseTopModal, openConfirmModal, loadingSkeleton, errorBanner } from './modal.js';
 import { showToast } from './toast.js';
 import { searchQuery, resetSearchAndRefresh } from './home.js';
@@ -174,7 +174,7 @@ function customerModalHtml(){
           </div>
           ${canCall && d.facebookId ? `
           <div style="display:flex; align-items:flex-end; padding-bottom:1px;">
-            <a class="round-btn facebook" href="https://m.me/${esc(d.facebookId)}" target="_blank" rel="noopener">${ICON.facebook}</a>
+            <a class="round-btn facebook" href="${facebookProfileUrl(d.facebookId)}" target="_blank" rel="noopener">${ICON.facebook}</a>
           </div>` : ''}
         </div>
         <div class="field">

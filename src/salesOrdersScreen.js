@@ -1,6 +1,5 @@
 import { ICON } from './icons.js';
-import { esc, fmtDate } from './utils.js';
-import { fmtVND } from './utils.js';
+import { esc, fmtDate, fmtVND, facebookProfileUrl } from './utils.js';
 import { openModal, rerenderTopModal, openConfirmModal, loadingSkeleton, emptyState, errorBanner } from './modal.js';
 import { showToast } from './toast.js';
 import {
@@ -105,29 +104,35 @@ function buildBillText(o){
   return `HÓA ĐƠN — ${custName}\nNgày: ${fmtDate(o.order_date)}\n\n${body}\n\nTổng cộng: ${fmtVND(total)}\n\nThông tin chuyển khoản:\n${BANK_INFO}`;
 }
 
-async function copyBillText(id){
+async function copyBillText(id, silent){
   const o = (screenOrders||[]).find(x=>x.id===id);
   if(!o) return;
   try{
     await navigator.clipboard.writeText(buildBillText(o));
-    showToast('Đã copy nội dung bill.', []);
+    if(!silent) showToast('Đã copy nội dung bill.', []);
+    return true;
   } catch(err){
-    showToast('Không copy được nội dung bill — anh soạn tay giúp.', []);
+    if(!silent) showToast('Không copy được nội dung bill — anh soạn tay giúp.', []);
+    return false;
   }
 }
 
-// Mở cửa sổ Zalo/Messenger NGAY trong lúc bấm (đồng bộ) — nếu chờ copy clipboard
+// Mở cửa sổ Zalo/Facebook NGAY trong lúc bấm (đồng bộ) — nếu chờ copy clipboard
 // (bất đồng bộ) xong mới mở thì nhiều trình duyệt di động sẽ chặn popup vì không còn
 // tính là hành động trực tiếp của người dùng nữa.
-function sendBill(id, channel){
+async function sendBill(id, channel){
   const o = (screenOrders||[]).find(x=>x.id===id);
   if(!o) return;
   if(channel==='zalo' && o.customers?.phone){
     window.open(`https://zalo.me/${o.customers.phone}`, '_blank', 'noopener');
+    copyBillText(id);
   } else if(channel==='facebook' && o.customers?.facebook_id){
-    window.open(`https://m.me/${o.customers.facebook_id}`, '_blank', 'noopener');
+    window.open(facebookProfileUrl(o.customers.facebook_id), '_blank', 'noopener');
+    const copied = await copyBillText(id, true);
+    showToast(copied
+      ? 'Đã mở trang Facebook của khách — bấm nút "Nhắn tin" trên đó rồi dán nội dung bill đã copy.'
+      : 'Đã mở trang Facebook của khách — bấm nút "Nhắn tin" trên đó (không copy được nội dung bill, anh soạn tay giúp).', []);
   }
-  copyBillText(id);
 }
 
 async function viewSODetail(id){

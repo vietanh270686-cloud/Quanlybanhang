@@ -18,3 +18,9 @@ export function fmtDateInputToVN(isoDate){
   const [y,m,d] = isoDate.split('-');
   return `${d}/${m}/${y}`;
 }
+// m.me/<id> hay bị Facebook chặn với trang cá nhân (không phải Page) -> dùng thẳng link
+// trang cá nhân, người dùng tự bấm "Nhắn tin" trong Facebook — luôn vào đúng người.
+export function facebookProfileUrl(facebookId){
+  const id = (facebookId||'').trim();
+  return /^\d+$/.test(id) ? `https://www.facebook.com/profile.php?id=${id}` : `https://www.facebook.com/${id}`;
+}

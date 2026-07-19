@@ -15,6 +15,10 @@ export async function updateProduct(id, patch){
   if(error) throw error;
   return data;
 }
+export async function deleteProduct(id){
+  const { error } = await supabase.from('products').delete().eq('id', id);
+  if(error) throw error;
+}
 
 // Lịch sử đối tác từng bán sản phẩm này, gần nhất trước
 export async function getPartnerHistoryForProduct(productId){

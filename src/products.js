@@ -1,10 +1,10 @@
 import { ICON } from './icons.js';
 import { esc, fmtVND, timeAgo } from './utils.js';
-import { openModal, rerenderTopModal, requestCloseTopModal, loadingSkeleton, errorBanner } from './modal.js';
+import { openModal, rerenderTopModal, requestCloseTopModal, openConfirmModal, loadingSkeleton, errorBanner } from './modal.js';
 import { showToast } from './toast.js';
 import { searchQuery, resetSearchAndRefresh } from './home.js';
 import {
-  getProduct, createProduct, updateProduct,
+  getProduct, createProduct, updateProduct, deleteProduct,
   getPartnerHistoryForProduct, setPartnerPrice, deletePartnerPrice,
   searchPartnersByName,
 } from './api/products.js';
@@ -38,8 +38,10 @@ export async function openProductModal(productId){
       sellPriceRetail: existing ? existing.sell_price_retail : 0,
       sellPriceWholesale: existing ? existing.sell_price_wholesale : 0,
       source: defaultSource,
+      restockQty: 0,
       errors: {},
       existingImportPrice: existing ? existing.import_price : 0,
+      existingStockQty: existing ? (existing.stock_qty||0) : 0,
       existingSnapshot: existing ? {
         name: existing.name,
         sell_price_retail: existing.sell_price_retail,
@@ -141,7 +143,18 @@ function productModalHtml(){
             <div class="field-label">Giá nhập (${esc(sourceLabel(productDraft.source))})</div>
             <input class="input" type="number" id="pf-import" value="${productDraft.source.price||''}" placeholder="0">
           </div>
+          ${productDraft.source.type==='partner' ? `
+          <div class="field">
+            <div class="field-label">SL nhập từ đối tác này</div>
+            <div class="qty-stepper">
+              <div class="qty-btn" data-action="restock-qty" data-delta="-1">${ICON.minus}</div>
+              <input class="qty-input" type="number" min="0" id="pf-restock-qty" value="${productDraft.restockQty}">
+              <div class="qty-btn" data-action="restock-qty" data-delta="1">${ICON.plus}</div>
+            </div>
+          </div>
+          ` : ''}
         </div>
+        ${productDraft.source.type==='partner' ? `<div class="field-note" style="margin-top:-6px; margin-bottom:12px;">Tồn kho hiện tại: ${productDraft.existingStockQty}${productDraft.restockQty>0?` · Sẽ nhập thêm ${productDraft.restockQty} -> tồn kho mới ${productDraft.existingStockQty+productDraft.restockQty}`:''}</div>` : ''}
         <div class="field-row">
           <div class="field">
             <div class="field-label">Giá bán lẻ</div>
@@ -184,7 +197,10 @@ function productModalHtml(){
       </div>
     </div>
     <div class="modal-foot">
-      <button class="btn btn-ghost" data-action="close-modal">Đóng</button>
+      ${isNew
+        ? `<button class="btn btn-ghost" data-action="close-modal">Đóng</button>`
+        : `<button class="btn btn-danger-ghost" data-action="delete-product">${ICON.trash} Xóa</button>`
+      }
       <button class="btn btn-primary btn-block" data-action="save-product">${ICON.check} ${isNew?'Tạo mới':'Cập nhật'}</button>
     </div>
   `;
@@ -200,6 +216,12 @@ function wireProductModalInputs(){
   if(retailEl) retailEl.addEventListener('input', e=>{ productDraft.sellPriceRetail = parseFloat(e.target.value)||0; });
   const wholesaleEl = byId('pf-sell-wholesale');
   if(wholesaleEl) wholesaleEl.addEventListener('input', e=>{ productDraft.sellPriceWholesale = parseFloat(e.target.value)||0; });
+  const restockEl = byId('pf-restock-qty');
+  if(restockEl) restockEl.addEventListener('input', e=>{
+    productDraft.restockQty = Math.max(0, parseInt(e.target.value)||0);
+    rerenderTopModal(productModalHtml());
+    wireProductModalInputs();
+  });
   const partnerSearchEl = byId('pf-partner-search');
   if(partnerSearchEl){
     partnerSearchEl.addEventListener('input', async e=>{
@@ -219,6 +241,7 @@ function wireProductModalInputs(){
 export function handleProductModalAction(action, el){
   switch(action){
     case 'select-source':
+      productDraft.restockQty = 0;
       if(el.dataset.type==='kho'){
         productDraft.source = { type:'kho', price: productDraft.id ? productDraft.existingImportPrice : 0 };
       } else {
@@ -226,14 +249,45 @@ export function handleProductModalAction(action, el){
       }
       paintProductModal();
       return true;
+    case 'restock-qty':
+      productDraft.restockQty = Math.max(0, productDraft.restockQty + parseInt(el.dataset.delta));
+      paintProductModal();
+      return true;
     case 'save-product':
       saveProductDraft();
+      return true;
+    case 'delete-product':
+      confirmDeleteProduct();
       return true;
     case 'retry-product-modal':
       openProductModal(productDraft?.id || null);
       return true;
   }
   return false;
+}
+
+function confirmDeleteProduct(){
+  const name = productDraft.name || 'sản phẩm này';
+  if(productDraft.existingStockQty > 0){
+    showToast(`Không thể xóa "${name}" — còn ${productDraft.existingStockQty} tồn kho. Cập nhật tồn kho về 0 ở màn Kho hàng trước khi xóa.`, []);
+    return;
+  }
+  openConfirmModal('Xóa sản phẩm?', `Xóa "${esc(name)}"? Không thể hoàn tác.`, ()=>commitDeleteProduct());
+}
+
+async function commitDeleteProduct(){
+  try{
+    await deleteProduct(productDraft.id);
+    requestCloseTopModal();
+    resetSearchAndRefresh();
+    showToast(`Đã xóa sản phẩm "${productDraft.name}".`, []);
+  } catch(err){
+    if(err && err.code === '23503'){
+      showToast(`Không xóa được "${productDraft.name}" — sản phẩm đã có trong lịch sử đơn hàng/nhập hàng nên phải giữ lại. Có thể đặt giá bán về 0 nếu không muốn bán nữa.`, []);
+    } else {
+      showToast('Không xóa được sản phẩm — kiểm tra lại kết nối mạng.', []);
+    }
+  }
 }
 
 function saveProductDraft(){
@@ -277,14 +331,25 @@ async function commitProductSave(){
       }
     }
 
+    const restockQty = productDraft.restockQty || 0;
+    const beforeStockQty = productDraft.existingStockQty || 0;
+    if(productDraft.source.type==='partner' && restockQty > 0){
+      product = await updateProduct(product.id, { stock_qty: beforeStockQty + restockQty });
+    }
+
     requestCloseTopModal();
     resetSearchAndRefresh();
 
+    const restockNote = restockQty>0 ? ` Đã nhập thêm ${restockQty} vào kho — tồn kho mới: ${beforeStockQty+restockQty}.` : '';
     if(isEdit){
       const beforeFull = productDraft.existingSnapshot;
-      showToast(`Đã cập nhật "${name}".`, [], { icon:ICON.check, undo: async ()=>{
+      showToast(`Đã cập nhật "${name}".${restockNote}`, [], { icon:ICON.check, undo: async ()=>{
         try{
-          await updateProduct(product.id, { name: beforeFull.name, sell_price_retail: beforeFull.sell_price_retail, sell_price_wholesale: beforeFull.sell_price_wholesale, import_price: beforeFull.import_price });
+          await updateProduct(product.id, {
+            name: beforeFull.name, sell_price_retail: beforeFull.sell_price_retail,
+            sell_price_wholesale: beforeFull.sell_price_wholesale, import_price: beforeFull.import_price,
+            stock_qty: beforeStockQty,
+          });
           if(productDraft.source.type==='partner'){
             if(beforePartnerPrice) await setPartnerPrice(beforePartnerPrice.partnerId, product.id, beforePartnerPrice.price);
             else await deletePartnerPrice(productDraft.source.partnerId, product.id);
@@ -296,7 +361,7 @@ async function commitProductSave(){
         }
       }});
     } else {
-      showToast(`Đã tạo sản phẩm "${name}".`, [], { icon:ICON.check });
+      showToast(`Đã tạo sản phẩm "${name}".${restockNote}`, [], { icon:ICON.check });
     }
   } catch(err){
     showToast('Không lưu được sản phẩm — kiểm tra lại kết nối mạng và thử lại.', []);
