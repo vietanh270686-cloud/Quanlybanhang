@@ -9,6 +9,8 @@ import {
   searchPartnersByName,
 } from './api/products.js';
 import { findByExactName } from './supabaseClient.js';
+import { addToPartnerDraftOrder, updatePOLine, deletePOLine } from './api/purchaseOrders.js';
+import { notifyPurchaseOrdersChanged } from './purchaseOrdersScreen.js';
 
 let productDraft = null;
 let productPartnerQuery = '';
@@ -155,7 +157,7 @@ function productModalHtml(){
           </div>
           ` : ''}
         </div>
-        ${productDraft.source.type==='partner' ? `<div class="field-note" style="margin-top:-6px; margin-bottom:12px;">Tồn kho hiện tại: ${productDraft.existingStockQty}${productDraft.restockQty>0?` · Sẽ nhập thêm ${productDraft.restockQty} -> tồn kho mới ${productDraft.existingStockQty+productDraft.restockQty}`:''}</div>` : ''}
+        ${productDraft.source.type==='partner' ? `<div class="field-note" style="margin-top:-6px; margin-bottom:12px;">Tồn kho hiện tại: ${productDraft.existingStockQty}${productDraft.restockQty>0?` · Sẽ thêm ${productDraft.restockQty} vào đơn nhập chờ duyệt từ đối tác này — tồn kho chỉ tăng sau khi duyệt đơn ở màn Hàng nhập`:''}</div>` : ''}
         <div class="field-row">
           <div class="field">
             <div class="field-label">Giá bán lẻ</div>
@@ -352,15 +354,16 @@ async function commitProductSave(){
     }
 
     const restockQty = productDraft.restockQty || 0;
-    const beforeStockQty = productDraft.existingStockQty || 0;
+    let poLineResult = null;
     if(productDraft.source.type==='partner' && restockQty > 0){
-      product = await updateProduct(product.id, { stock_qty: beforeStockQty + restockQty });
+      poLineResult = await addToPartnerDraftOrder(productDraft.source.partnerId, product.id, restockQty, productDraft.source.price);
+      notifyPurchaseOrdersChanged();
     }
 
     requestCloseTopModal();
     resetSearchAndRefresh();
 
-    const restockNote = restockQty>0 ? ` Đã nhập thêm ${restockQty} vào kho — tồn kho mới: ${beforeStockQty+restockQty}.` : '';
+    const restockNote = restockQty>0 ? ` Đã thêm ${restockQty} vào đơn nhập chờ duyệt từ đối tác — vào Hàng nhập để duyệt.` : '';
     if(isEdit){
       const beforeFull = productDraft.existingSnapshot;
       showToast(`Đã cập nhật "${name}".${restockNote}`, [], { icon:ICON.check, undo: async ()=>{
@@ -368,8 +371,15 @@ async function commitProductSave(){
           await updateProduct(product.id, {
             name: beforeFull.name, sell_price_retail: beforeFull.sell_price_retail,
             sell_price_wholesale: beforeFull.sell_price_wholesale, import_price: beforeFull.import_price,
-            stock_qty: beforeStockQty,
           });
+          if(poLineResult){
+            if(poLineResult.previousLine){
+              await updatePOLine(poLineResult.previousLine.id, { qty: poLineResult.previousLine.qty, import_price: poLineResult.previousLine.import_price });
+            } else {
+              await deletePOLine(poLineResult.line.id);
+            }
+            notifyPurchaseOrdersChanged();
+          }
           if(productDraft.source.type==='partner'){
             if(beforePartnerPrice) await setPartnerPrice(beforePartnerPrice.partnerId, product.id, beforePartnerPrice.price);
             else await deletePartnerPrice(productDraft.source.partnerId, product.id);

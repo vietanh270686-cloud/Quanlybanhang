@@ -2,7 +2,9 @@ import { ICON } from './icons.js';
 import { esc, fmtVND, debounce } from './utils.js';
 import { openModal, rerenderTopModal, closeTopModal, loadingSkeleton, errorBanner } from './modal.js';
 import { showToast } from './toast.js';
-import { getProduct, updateProduct, getPartnerPrice, setPartnerPrice, searchPartnersByName } from './api/products.js';
+import { getProduct, updateProduct, getPartnerPrice, searchPartnersByName } from './api/products.js';
+import { addToPartnerDraftOrder } from './api/purchaseOrders.js';
+import { notifyPurchaseOrdersChanged } from './purchaseOrdersScreen.js';
 
 let wrap = null;
 let draft = null; // {productId, orderQty, product, stockQty, originalStockQty, partnerId, partnerName, partnerQuery, partnerResults, partnerQty, partnerQtyTouched, priceOverride, onSaved}
@@ -131,7 +133,7 @@ function bodyHtml(){
         <div style="font-size:11px; color:var(--ink-faint); font-weight:700; text-transform:uppercase;">Tổng tiền nhập</div>
         <div style="font-size:17px; font-weight:800; font-family:'Sora';" id="rs-total-value">${fmtVND(total)}</div>
       </div>
-      ` : `<div style="flex:1; font-size:12px; color:var(--ink-faint); line-height:1.5;">Chưa chọn đối tác — vẫn lưu được nếu chỉ sửa trực tiếp "Số lượng trong kho".</div>`}
+      ` : `<div style="flex:1; font-size:12px; color:var(--ink-faint); line-height:1.5;">Chưa chọn đối tác — vẫn lưu được nếu chỉ sửa trực tiếp "Số lượng trong kho". Chọn đối tác sẽ thêm vào đơn nhập chờ duyệt, tồn kho chỉ tăng sau khi duyệt đơn.</div>`}
       <button class="btn btn-primary" data-action="restock-save" ${canSave()?'':'disabled'}>${ICON.check} Lưu</button>
     </div>
   `;
@@ -191,19 +193,22 @@ async function pickPartner(partnerId, partnerName){
 async function save(){
   if(!draft || !canSave()) return;
   try{
-    if(!draft.partnerId){
+    const stockChanged = draft.stockQty !== draft.originalStockQty;
+    if(stockChanged){
       await updateProduct(draft.productId, { stock_qty: draft.stockQty });
+    }
+    if(!draft.partnerId){
       closeTopModal();
       showToast(`Đã cập nhật tồn kho "${draft.product.name}" thành ${draft.stockQty}.`, []);
       if(draft.onSaved) draft.onSaved({ productId:draft.productId, stockQty:draft.stockQty });
     } else {
       const price = currentPrice();
-      const newStockQty = draft.stockQty + draft.partnerQty;
-      await updateProduct(draft.productId, { stock_qty: newStockQty, import_price: price });
-      await setPartnerPrice(draft.partnerId, draft.productId, price);
+      await addToPartnerDraftOrder(draft.partnerId, draft.productId, draft.partnerQty, price);
+      notifyPurchaseOrdersChanged();
       closeTopModal();
-      showToast(`Đã nhập ${draft.partnerQty} "${draft.product.name}" từ ${draft.partnerName} — tồn kho mới: ${newStockQty}.`, []);
-      if(draft.onSaved) draft.onSaved({ productId:draft.productId, stockQty:newStockQty, importPrice:price });
+      const stockNote = stockChanged ? ` Đã cập nhật tồn kho thành ${draft.stockQty}.` : '';
+      showToast(`Đã thêm ${draft.partnerQty} "${draft.product.name}" vào đơn nhập chờ duyệt từ ${draft.partnerName}.${stockNote} Vào Hàng nhập để duyệt.`, []);
+      if(draft.onSaved) draft.onSaved({ productId:draft.productId, stockQty:draft.stockQty });
     }
   } catch(err){
     showToast('Không lưu được — kiểm tra lại kết nối mạng.', []);

@@ -310,6 +310,13 @@ function findProductCache(productId){
 }
 
 async function soAddLine(productId){
+  // Mỗi sản phẩm chỉ hiện 1 dòng trong đơn — nếu đã có, cộng dồn số lượng thay vì tạo dòng mới.
+  const existingLine = displayLines().find(l=>l.productId===productId);
+  if(existingLine){
+    await soSetQty(existingLine.id, existingLine.qty+1);
+    return;
+  }
+
   const p = findProductCache(productId);
   if(!p) return;
   const custType = customerDraft.type;

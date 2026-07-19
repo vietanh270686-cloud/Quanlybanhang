@@ -50,6 +50,30 @@ export async function deletePOLine(lineId){
   if(error) throw error;
 }
 
+// Thêm (hoặc cộng dồn nếu đã có dòng cùng sản phẩm) vào đơn nháp (chờ duyệt) của đối
+// tác này — dùng chung cho mọi nơi có thể "nhập hàng từ đối tác": popup Sản phẩm,
+// popup Nhập hàng (từ Khách hàng), và popup Đối tác — để tất cả gộp về đúng 1 đơn
+// nháp, hiện đầy đủ ở màn Hàng nhập.
+export async function addToPartnerDraftOrder(partnerId, productId, qty, importPrice){
+  const po = await getOrCreateDraftPO(partnerId);
+  const { data: existing, error: findErr } = await supabase
+    .from('purchase_order_lines').select('*, products(id, name)')
+    .eq('purchase_order_id', po.id).eq('product_id', productId).maybeSingle();
+  if(findErr) throw findErr;
+  if(existing){
+    const { data: updated, error: updErr } = await supabase
+      .from('purchase_order_lines').update({ qty: existing.qty + qty, import_price: importPrice })
+      .eq('id', existing.id).select('*, products(id, name)').single();
+    if(updErr) throw updErr;
+    return { po, line: updated, previousLine: existing };
+  }
+  const { data: created, error: insErr } = await supabase
+    .from('purchase_order_lines').insert({ purchase_order_id: po.id, product_id: productId, qty, import_price: importPrice })
+    .select('*, products(id, name)').single();
+  if(insErr) throw insErr;
+  return { po, line: created, previousLine: null };
+}
+
 export async function cancelPurchaseOrder(id){
   const { error } = await supabase.from('purchase_orders').update({ status:'cancelled' }).eq('id', id);
   if(error) throw error;
