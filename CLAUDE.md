@@ -33,7 +33,7 @@ src/
   modal.js             # openModal/rerenderTopModal/openConfirmModal/loadingSkeleton/emptyState/errorBanner
   toast.js             # showToast (có undo, tự ẩn sau 6-7s)
   icons.js             # SVG icon inline dùng chung
-  utils.js             # fmtVND/fmtDate/esc/debounce/facebookProfileUrl...
+  utils.js             # fmtVND/fmtDate/esc/debounce/facebookProfileUrl/todayStr/sortByStockPriority...
   supabaseClient.js    # supabase client + findByExactName (check trùng tên)
   style.css            # toàn bộ CSS (không dùng CSS module/framework)
 
@@ -100,10 +100,12 @@ mới cho user chạy — không giả định user còn nhớ đã chạy đún
 7. **Đơn nháp (status='moi') không giới hạn theo ngày tạo** — `getOrCreateDraftSO`/
    `getOrCreateDraftPO` tìm đơn 'moi' gần nhất của khách/đối tác đó bất kể ngày, rồi TỰ CẬP
    NHẬT `order_date` về hôm nay nếu khác — để đơn chưa chốt không bị "kẹt" ở ngày cũ khi mở lại.
-8. **`todayStr()` dùng UTC** (`new Date().toISOString().slice(0,10)`), KHÔNG phải giờ Việt Nam
-   (UTC+7). Từ 00:00–07:00 giờ VN, ngày UTC vẫn là hôm qua → có thể gây lệch ngày nếu user thao
-   tác khung giờ này. Đây là nguyên nhân nghi vấn khi user báo "thiếu dữ liệu ngày X" — luôn kiểm
-   tra khoảng ngày X-1 → X+1 khi debug, không chỉ đúng ngày X.
+8. **`todayStr()` tính theo giờ Việt Nam (UTC+7)** — hàm dùng chung trong `utils.js`
+   (`new Date(Date.now() + 7*60*60*1000).toISOString().slice(0,10)`), import vào mọi nơi cần biết
+   "hôm nay" (Đơn bán, Hàng nhập, dashboard đếm đơn, tạo/roll-forward đơn nháp) — KHÔNG còn định
+   nghĩa `todayStr()` riêng lẻ ở từng file nữa. Trước đây dùng UTC thô nên quanh 00:00–07:00 giờ
+   VN, "hôm nay" của app vẫn tính là hôm qua — đã xác nhận đây chính là nguyên nhân user báo
+   "thiếu dữ liệu ngày 19/07/2026" (đã fix, xem thêm ở mục "Việc đang dang dở").
 9. **1 sản phẩm chỉ hiện 1 dòng trong đơn bán/đơn mua** — thêm sản phẩm đã có sẵn trong đơn
    sẽ cộng dồn số lượng vào dòng đó, không tạo dòng mới (xem `soAddLine`/`poAddLine`).
 10. **Cơ chế khớp cầu–cung (pending_demand)**: hiện KHÔNG còn đường nào tạo `source_type='partner'`
@@ -125,6 +127,19 @@ mới cho user chạy — không giả định user còn nhớ đã chạy đún
     trình duyệt di động sẽ chặn popup vì mất "user gesture".
 14. **Nội dung bill** (copy clipboard) có kèm STK ngân hàng: `1282666675 — BIDV, Chi nhánh
     Tràng Tiền, Hà Nội` (xem `BANK_INFO` trong `salesOrdersScreen.js`).
+15. **Tồn kho ÂM là trạng thái hợp lệ, không bị chặn** — không kiểm tra `stock_qty` khi thêm sản
+    phẩm vào đơn bán (chỉ hiện gợi ý mềm "Nhập hàng" nếu tồn không đủ), và khi chốt đơn bán,
+    `close_sales_order` trừ thẳng `stock_qty` không giới hạn dưới 0 (bán vượt số thực có, chờ
+    mua bù). Sản phẩm âm phải LUÔN dễ thấy để chủ shop mua bù kịp thời — xử lý ở 2 nơi:
+    - **Menu "Sản phẩm"** (`productsMenu.js`) và **"Kho hàng"** (`warehouseScreen.js`): dùng
+      `sortByStockPriority()` (`utils.js`) chia danh sách thành 3 nhóm theo thứ tự Âm → Dương →
+      = 0 (nhóm Âm sắp âm nhiều nhất lên trước), kèm nhãn cảnh báo "Âm X — cần mua bù".
+    - **Kho hàng mặc định** (`listWarehouseProducts` không có query) lọc `stock_qty != 0` (hiện
+      cả âm lẫn dương, chỉ ẩn đúng 0) — trước đây lọc `> 0` nên vô tình ẩn mất sản phẩm âm.
+    - **Tiền hàng tồn kho ở Kho hàng**: dòng sản phẩm âm chỉ để NHÌN THẤY và điều chỉnh lại cho
+      khớp thực tế — không tính vào "Thành tiền" của dòng (hiện 0đ) và không cộng vào "Tổng tiền
+      hàng tồn kho" (xem `lineTotalFor()` trong `warehouseScreen.js`). Chỉ sản phẩm dương mới
+      được tính tiền.
 
 ## Quy ước UI
 
@@ -136,7 +151,9 @@ mới cho user chạy — không giả định user còn nhớ đã chạy đún
   tải sẵn (quick-add trong popup Khách hàng/Đối tác) KHÔNG debounce — không có chi phí mạng
   nên thêm độ trễ chỉ làm chậm vô ích.
 - Màn "Đơn bán"/"Hàng nhập": cấu trúc P1 (1 card: ngày sửa được mặc định hôm nay + ô tìm
-  theo khách hàng/đối tác trong ngày đó + số liệu tổng ngày) + P2 (danh sách lọc theo P1).
+  theo khách hàng/đối tác trong ngày đó + số liệu tổng ngày — Đơn bán: "Tổng tiền bán" + "Lãi/Lỗ";
+  Hàng nhập: 1 ô "Tổng tiền mua từ đối tác" duy nhất) + P2 (danh sách lọc theo P1, không lọc số
+  liệu tổng — số liệu tổng luôn tính trên cả ngày, không theo kết quả tìm kiếm).
 
 ## Thứ tự & trạng thái các file SQL đã giao cho user (thư mục Downloads của user)
 
@@ -166,8 +183,15 @@ này theo đúng thứ tự — hỏi lại user đã chạy file nào:
 - Mọi thay đổi DB (cột mới, hàm mới) đều phải giao file `.sql` riêng, đặt tên rõ mục đích,
   và nói rõ cho user: chạy 1 lần hay an toàn chạy lại nhiều lần.
 
-## Việc đang dang dở (tại thời điểm ghi file này)
+## Lịch sử các vấn đề đã xử lý gần đây (tham khảo khi debug việc tương tự)
 
-Đang chờ user chạy `kiem-tra-du-lieu-19-07.sql` (SELECT thuần, không sửa gì) và gửi lại kết
-quả để xác định vì sao "Hàng nhập" báo thiếu dữ liệu ngày 19/07/2026 — nghi do lệch UTC/giờ VN
-(mục 8 ở trên) hoặc do đơn bị hủy/chưa merge đúng vào đơn nháp chung.
+- **"Hàng nhập"/"Công nợ" báo thiếu dữ liệu ngày 19/07/2026`** — user chạy
+  `kiem-tra-du-lieu-19-07.sql`, kết quả cho thấy dữ liệu DB hoàn toàn đúng (2 đơn mua đã chốt,
+  công nợ tự khớp) — 2 đơn hủy + 1 đơn nháp rỗng bị ẩn khỏi danh sách là ĐÚNG hành vi theo luật
+  đã chốt trước đó, không phải lỗi. Nhưng test trực tiếp phát hiện app đang mặc định mở "hôm
+  nay" là ngày UTC (lệch 1 ngày so với giờ VN vào đầu ngày) — xác nhận đúng nghi vấn ở mục 8,
+  đã fix bằng cách gộp `todayStr()` dùng chung + tính theo giờ VN.
+- **Tồn kho âm** — theo yêu cầu mới, đã audit và bổ sung việc hiện sản phẩm âm ưu tiên đầu danh
+  sách + không tính tiền âm vào tổng kho (xem mục 15 business logic ở trên).
+- Không còn việc gì đang dang dở tại thời điểm ghi file này — mọi yêu cầu trong phiên đã hoàn
+  thành, code mới nhất đã deploy lên live thành công.
