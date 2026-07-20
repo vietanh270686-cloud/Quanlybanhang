@@ -160,8 +160,9 @@ này theo đúng thứ tự — hỏi lại user đã chạy file nào:
 
 - User đồng ý cho **tự động commit + push sau mỗi phần xong** (không cần hỏi xác nhận từng lần) —
   xác nhận từ phiên trước, vẫn nên dùng phán đoán nếu thay đổi có rủi ro cao.
-- Đang làm việc trên nhánh `feature/explicit-create-duplicate-warning`, có PR #1 mở
-  (https://github.com/vietanh270686-cloud/Quanlybanhang/pull/1), CHƯA merge vào `main`.
+- PR #1 (`feature/explicit-create-duplicate-warning` → `main`) đã merge. Từ nay làm việc
+  trực tiếp trên `main` (push `main` là live ngay qua GitHub Actions) — không tạo nhánh
+  feature riêng nữa trừ khi user yêu cầu.
 - Mọi thay đổi DB (cột mới, hàm mới) đều phải giao file `.sql` riêng, đặt tên rõ mục đích,
   và nói rõ cho user: chạy 1 lần hay an toàn chạy lại nhiều lần.
 
