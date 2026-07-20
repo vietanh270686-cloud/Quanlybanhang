@@ -118,12 +118,13 @@ export async function getAvgImportPriceMap(){
   return map;
 }
 
-// Danh sách sản phẩm cho màn Kho hàng: không gõ tìm kiếm -> chỉ sản phẩm còn tồn;
-// có gõ tìm kiếm -> toàn bộ sản phẩm khớp tên (kể cả đã hết hàng) để chủ động cập nhật lại tồn kho.
+// Danh sách sản phẩm cho màn Kho hàng: không gõ tìm kiếm -> sản phẩm còn tồn HOẶC đang âm
+// (âm nghĩa là đã bán vượt số thực có, cần thấy ngay để mua bù) — chỉ ẩn sản phẩm đúng 0;
+// có gõ tìm kiếm -> toàn bộ sản phẩm khớp tên (kể cả 0) để chủ động cập nhật lại tồn kho.
 export async function listWarehouseProducts(query){
   let q = supabase.from('products').select('*').order('name');
   if(query) q = q.ilike('name', `%${query}%`);
-  else q = q.gt('stock_qty', 0);
+  else q = q.neq('stock_qty', 0);
   const { data, error } = await q;
   if(error) throw error;
   return data||[];

@@ -1,5 +1,5 @@
 import { ICON } from './icons.js';
-import { esc, fmtVND, debounce } from './utils.js';
+import { esc, fmtVND, debounce, sortNegativeStockFirst } from './utils.js';
 import { openModal, rerenderTopModal, loadingSkeleton, errorBanner } from './modal.js';
 import { searchProductsByName, getLatestPartnerPricesMap } from './api/products.js';
 import { openProductModal } from './products.js';
@@ -22,7 +22,7 @@ async function load(){
   try{
     const [list, partnerMap] = await Promise.all([ searchProductsByName(query), getLatestPartnerPricesMap() ]);
     if(myQuery !== query) return;
-    items = list;
+    items = sortNegativeStockFirst(list);
     latestPartnerMap = partnerMap;
     itemsError = null;
   } catch(err){
@@ -51,11 +51,12 @@ function listHtml(){
   if(!items.length) return `<div class="no-results">Không tìm thấy sản phẩm phù hợp.</div>`;
   return items.map(p=>{
     const lp = latestPartnerMap[p.id];
+    const stock = p.stock_qty||0;
     return `<div class="result-row" data-action="pm-open" data-id="${p.id}">
       <div class="result-icon" style="background:var(--kho-bg); color:var(--kho);">${ICON.box}</div>
       <div class="result-main">
-        <div class="result-title">${esc(p.name)}</div>
-        <div class="result-sub">Tồn kho: ${p.stock_qty||0} · Nhập gần nhất: ${fmtVND(lp?lp.price:p.import_price)}${lp?' · '+esc(lp.partnerName||''):''}</div>
+        <div class="result-title">${esc(p.name)} ${stock<0?`<span class="stock-pill low">Âm ${Math.abs(stock)} — cần mua bù</span>`:''}</div>
+        <div class="result-sub">Tồn kho: ${stock} · Nhập gần nhất: ${fmtVND(lp?lp.price:p.import_price)}${lp?' · '+esc(lp.partnerName||''):''}</div>
       </div>
       <div class="result-meta">Lẻ ${fmtVND(p.sell_price_retail)}</div>
     </div>`;

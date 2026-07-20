@@ -1,5 +1,5 @@
 import { ICON } from './icons.js';
-import { esc, fmtVND, debounce } from './utils.js';
+import { esc, fmtVND, debounce, sortNegativeStockFirst } from './utils.js';
 import { openModal, rerenderTopModal, loadingSkeleton, errorBanner } from './modal.js';
 import { showToast } from './toast.js';
 import { listWarehouseProducts, getAvgImportPriceMap, getPendingKhoQtyMap, updateProduct } from './api/products.js';
@@ -28,7 +28,7 @@ async function load(){
   try{
     const [list, avg, pending] = await Promise.all([ listWarehouseProducts(query), getAvgImportPriceMap(), getPendingKhoQtyMap() ]);
     if(myQuery !== query) return;
-    items = list;
+    items = sortNegativeStockFirst(list);
     avgMap = avg;
     pendingQtyMap = pending;
     itemsError = null;
@@ -61,7 +61,7 @@ function screenHtml(){
     <div class="modal-body">
       <div class="card" style="margin-bottom:12px;">
         <div class="search-box">${ICON.search}<input id="kho-search" placeholder="Gõ tên sản phẩm để tìm…" value="${esc(query)}" autocomplete="off"></div>
-        <div class="field-note">Mặc định chỉ hiện sản phẩm còn tồn kho — gõ tìm kiếm để thấy cả sản phẩm đã hết hàng và cập nhật lại.</div>
+        <div class="field-note">Mặc định hiện sản phẩm còn tồn hoặc đang âm (cần mua bù, luôn hiện đầu danh sách) — gõ tìm kiếm để thấy cả sản phẩm hết hàng (0) và cập nhật lại.</div>
       </div>
       <div id="kho-list">${listHtml()}</div>
       <div class="order-total-bar">
@@ -81,9 +81,10 @@ function listHtml(){
   if(!items.length) return `<div class="no-results">Không tìm thấy sản phẩm phù hợp.</div>`;
   return items.map(p=>{
     const minQty = minQtyFor(p.id);
+    const stock = p.stock_qty||0;
     return `
     <div class="kho-row">
-      <div class="kho-row-name">${esc(p.name)}</div>
+      <div class="kho-row-name">${esc(p.name)} ${stock<0?`<span class="stock-pill low">Âm ${Math.abs(stock)} — cần mua bù</span>`:''}</div>
       <div class="kho-row-grid">
         <div class="kho-field">
           <div class="kho-field-label">Giá nhập (TB)</div>
