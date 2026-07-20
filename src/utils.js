@@ -27,16 +27,17 @@ export function facebookProfileUrl(facebookId){
   const id = (facebookId||'').trim();
   return /^\d+$/.test(id) ? `https://www.facebook.com/profile.php?id=${id}` : `https://www.facebook.com/${id}`;
 }
-// Đưa sản phẩm tồn kho ÂM (đang bán vượt số thực có, cần mua bù gấp) lên đầu danh sách —
-// âm nhiều hơn lên trước; phần còn lại giữ nguyên thứ tự đã sắp (theo tên) từ truy vấn.
-export function sortNegativeStockFirst(items){
-  return [...items].sort((a,b)=>{
-    const an = a.stock_qty||0, bn = b.stock_qty||0;
-    if(an<0 && bn>=0) return -1;
-    if(bn<0 && an>=0) return 1;
-    if(an<0 && bn<0) return an-bn;
-    return 0;
+// Sắp danh sách sản phẩm thành 3 nhóm theo tồn kho: ÂM trước (cần mua bù gấp, âm nhiều
+// hơn lên trước), rồi tới DƯƠNG, cuối cùng mới tới = 0 — mỗi nhóm giữ nguyên thứ tự
+// (theo tên) đã sắp sẵn từ truy vấn.
+export function sortByStockPriority(items){
+  const neg=[], pos=[], zero=[];
+  items.forEach(p=>{
+    const s = p.stock_qty||0;
+    if(s<0) neg.push(p); else if(s>0) pos.push(p); else zero.push(p);
   });
+  neg.sort((a,b)=> (a.stock_qty||0)-(b.stock_qty||0));
+  return [...neg, ...pos, ...zero];
 }
 // Trì hoãn tìm kiếm cho tới khi ngừng gõ ms mili-giây — tránh gọi Supabase liên tục theo từng phím.
 export function debounce(fn, ms){

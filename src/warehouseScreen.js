@@ -1,5 +1,5 @@
 import { ICON } from './icons.js';
-import { esc, fmtVND, debounce, sortNegativeStockFirst } from './utils.js';
+import { esc, fmtVND, debounce, sortByStockPriority } from './utils.js';
 import { openModal, rerenderTopModal, loadingSkeleton, errorBanner } from './modal.js';
 import { showToast } from './toast.js';
 import { listWarehouseProducts, getAvgImportPriceMap, getPendingKhoQtyMap, updateProduct } from './api/products.js';
@@ -28,7 +28,7 @@ async function load(){
   try{
     const [list, avg, pending] = await Promise.all([ listWarehouseProducts(query), getAvgImportPriceMap(), getPendingKhoQtyMap() ]);
     if(myQuery !== query) return;
-    items = sortNegativeStockFirst(list);
+    items = sortByStockPriority(list);
     avgMap = avg;
     pendingQtyMap = pending;
     itemsError = null;
@@ -46,9 +46,15 @@ function priceFor(p){
 function qtyFor(p){
   return edits[p.id]?.qty!=null ? edits[p.id].qty : (p.stock_qty||0);
 }
+// Sản phẩm đang tồn kho ÂM chỉ để hiện ra cho điều chỉnh lại (đối chiếu thực tế) — không
+// tính vào tiền hàng tồn kho, nên thành tiền của dòng đó luôn = 0 và không cộng vào tổng.
+function lineTotalFor(p){
+  const qty = qtyFor(p);
+  return qty>0 ? qty*priceFor(p) : 0;
+}
 function grandTotal(){
   if(!items) return 0;
-  return items.reduce((s,p)=> s + qtyFor(p)*priceFor(p), 0);
+  return items.reduce((s,p)=> s + lineTotalFor(p), 0);
 }
 function hasChanges(){
   return Object.keys(edits).length>0;
@@ -100,7 +106,7 @@ function listHtml(){
         </div>
         <div class="kho-total">
           <div class="kho-field-label">Thành tiền</div>
-          <div class="kho-total-value" data-total-for="${p.id}">${fmtVND(qtyFor(p)*priceFor(p))}</div>
+          <div class="kho-total-value" data-total-for="${p.id}">${fmtVND(lineTotalFor(p))}</div>
         </div>
       </div>
       ${minQty>0 ? `<div class="field-note" style="margin-top:6px;">Đang giữ ${minQty} cho đơn bán chưa chốt — không thể đặt tồn kho thấp hơn số này.</div>` : ''}
@@ -153,7 +159,7 @@ function updateRowTotal(productId){
   const p = items.find(x=>x.id===productId);
   if(!p) return;
   const el = wrap.querySelector(`[data-total-for="${productId}"]`);
-  if(el) el.textContent = fmtVND(qtyFor(p)*priceFor(p));
+  if(el) el.textContent = fmtVND(lineTotalFor(p));
   const totalEl = wrap.querySelector('#kho-total');
   if(totalEl) totalEl.textContent = fmtVND(grandTotal());
 }

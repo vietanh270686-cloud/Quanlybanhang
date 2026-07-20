@@ -1,5 +1,5 @@
 import { ICON } from './icons.js';
-import { esc, fmtVND, debounce, sortNegativeStockFirst } from './utils.js';
+import { esc, fmtVND, debounce, sortByStockPriority } from './utils.js';
 import { openModal, rerenderTopModal, loadingSkeleton, errorBanner } from './modal.js';
 import { searchProductsByName, getLatestPartnerPricesMap } from './api/products.js';
 import { openProductModal } from './products.js';
@@ -22,7 +22,7 @@ async function load(){
   try{
     const [list, partnerMap] = await Promise.all([ searchProductsByName(query), getLatestPartnerPricesMap() ]);
     if(myQuery !== query) return;
-    items = sortNegativeStockFirst(list);
+    items = sortByStockPriority(list);
     latestPartnerMap = partnerMap;
     itemsError = null;
   } catch(err){
