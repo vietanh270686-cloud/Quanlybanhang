@@ -1,0 +1,1837 @@
+<!DOCTYPE html>
+<!--
+  DEMO PROTOTYPE — v5: thêm 4/5 màn còn lại ở thanh dưới — Kho hàng (5.7), Đơn bán (5.5),
+  Đơn nhập (5.6), Quản lý công nợ (5.9) — theo đúng mô tả trong thiet-ke-chuc-nang-so-ban-hang.md.
+  "Báo cáo" CHƯA làm vì tài liệu gốc không hề mô tả luồng cho màn này — vẫn là placeholder,
+  bấm vào sẽ báo rõ lý do thay vì giả định.
+  Data model: state.salesOrders/state.purchaseOrders là mảng đơn hàng đầy đủ (id, ngày, trạng
+  thái moi/closed/cancelled, dòng hàng) — thay cho map "1 đơn nháp/người" đơn giản ở bản trước,
+  để Đơn bán/Đơn nhập liệt kê được theo ngày. "Lưu" ở khối Khách hàng/Đối tác (màn chính) chỉ
+  ghi lại đơn NHÁP (status vẫn 'moi'); "Chốt" thật (trừ kho/cộng nợ, close_sales_order/
+  close_purchase_order) chỉ xảy ra ở màn Đơn bán/Đơn nhập, đúng như app thật — 2 việc này ĐÃ
+  được tách biệt lại đúng vai trò, khác với các bản v1-v4 (lúc đó do màn Đơn bán/Đơn nhập chưa
+  tồn tại nên "Lưu" tạm gánh luôn ý nghĩa "coi như xong việc").
+  DEMO PROTOTYPE — v4: bắt buộc chọn/tạo Sản phẩm/Khách hàng/Đối tác trước khi thao tác được
+  các khối con phía dưới. Khi 1 khối chưa có bản ghi nào được chọn (editBuffer[type] === null),
+  thẻ trạng thái + 2 khối con hiện ở dạng "khoá" (viền đứt nét, chạm vào đâu cũng mở popup tìm
+  kiếm) và nút Hủy/Lưu bị mờ đi/vô hiệu. Chỉ 2 cách mở khoá: chọn 1 bản ghi có sẵn qua popup
+  tìm kiếm, hoặc bấm rõ "+ Mới" — sau đó khối con mới cho thao tác/gõ như bình thường (giữ
+  đúng luật "chỉ tạo mới khi bấm rõ nút Tạo mới" của app thật). Trạng thái khoá chỉ áp dụng khi
+  CHƯA TỪNG chọn gì trong phiên — quay lại 1 khối đã chọn trước đó không bị khoá lại.
+  Kế thừa v3: layout cao cố định kiểu app thật (#app = 100vh, không cuộn trang).
+  Mỗi khối (Sản phẩm/Khách hàng/Đối tác) luôn có đúng 2 "khối con" kích thước BẰNG NHAU
+  (.card, flex:1) và tự cuộn riêng bên trong (.card-body) — vd khối Khách hàng: khối con
+  "Thông tin khách hàng" + khối con "Chi tiết đơn bán" cao bằng nhau, mỗi khối cuộn độc lập.
+  Hủy/Lưu (.footer-actions) cố định ngay trên thanh 5 icon, luôn thấy được không cần cuộn.
+  Kế thừa v2: tab-bar gọn + thẻ trạng thái + nút "+ Thêm sản phẩm" tường minh trong đơn nháp
+  (thay cho bản v1 "3 khối luôn hiện + tìm kiếm 2 nghĩa ẩn").
+  KHÔNG kết nối Supabase — dữ liệu mock trong bộ nhớ, mất khi tải lại trang.
+  Phạm vi: chỉ màn chính (chọn/tạo Sản phẩm, Khách hàng, Đối tác + soạn đơn nháp bán/mua).
+  Các icon Kho hàng/Đơn bán/Hàng nhập/Công nợ/Báo cáo ở thanh dưới chỉ là placeholder.
+-->
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Sổ Bán Hàng — Demo v5</title>
+<style>
+  :root{
+    --navy:#1e2749;
+    --navy-2:#2c3763;
+    --gold:#f6c94c;
+    --gold-border:#e0ab12;
+    --pink-bg:#fde3e3;
+    --pink-text:#c94b4b;
+    --green:#2e9e5b;
+    --gray:#9aa1b1;
+    --bg-page:#eef1f6;
+    --card-bg:#ffffff;
+    --text-main:#1c2233;
+    --text-muted:#828a9b;
+    --border:#e3e6ee;
+    --radius-lg:16px;
+    --radius-md:12px;
+    --radius-sm:8px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;}
+  body{
+    background:var(--bg-page);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--text-main);
+    -webkit-tap-highlight-color:transparent;
+    font-size:13px;
+  }
+  /* #app chiếm đúng chiều cao màn hình, không co giãn theo nội dung — giống nguyên tắc
+     "modal cao cố định" của app thật. Chỉ .card-body bên trong mỗi khối con được cuộn. */
+  #app{
+    max-width:460px;
+    margin:0 auto;
+    height:100vh;
+    height:100dvh;
+    background:var(--bg-page);
+    display:flex;
+    flex-direction:column;
+    position:relative;
+    overflow:hidden;
+  }
+  button{font-family:inherit;cursor:pointer;}
+  input{font-family:inherit;}
+
+  /* ---------- Topbar ---------- */
+  .topbar{
+    flex:none;
+    display:flex;align-items:center;justify-content:space-between;
+    padding:10px 12px 6px;
+  }
+  .shop-name{font-size:16px;font-weight:800;color:var(--navy);letter-spacing:.2px;}
+  .topbar-right{display:flex;align-items:center;gap:8px;}
+  .today{font-size:10.5px;color:var(--text-muted);background:#fff;border:1px solid var(--border);
+    padding:4px 9px;border-radius:999px;}
+  .icon-btn{width:28px;height:28px;border-radius:999px;border:1px solid var(--border);
+    background:#fff;display:flex;align-items:center;justify-content:center;color:var(--navy);}
+  .icon-btn svg{width:14px;height:14px;}
+
+  /* ---------- Tab bar (thay cho "3 khối luôn hiện" của bản v1) ---------- */
+  .tabbar{flex:none;display:flex;gap:6px;padding:2px 10px 6px;}
+  .tab{flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:7px 4px;
+    border-radius:10px;border:1.5px solid var(--border);background:#fff;font-size:11px;font-weight:700;
+    color:var(--text-muted);}
+  .tab svg{width:13px;height:13px;flex:none;}
+  .tab.active{background:#fdf3d0;border-color:var(--gold-border);color:var(--navy);}
+
+  /* ---------- Thẻ trạng thái: đang xử lý bản ghi nào của khối đang chọn ---------- */
+  .entity-header{flex:none;display:flex;align-items:center;justify-content:space-between;gap:8px;
+    background:#fff;border:1px solid var(--border);border-radius:12px;padding:9px 12px;margin:0 10px 8px;}
+  .eh-info{min-width:0;}
+  .eh-name{font-size:13.5px;font-weight:800;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .eh-sub{font-size:10px;color:var(--text-muted);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .eh-actions{display:flex;gap:5px;flex:none;}
+  .eh-actions button{padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:#f6f7fb;
+    font-size:11px;font-weight:700;color:var(--navy);white-space:nowrap;}
+  .eh-actions button.primary{background:var(--navy);color:#fff;border-color:var(--navy);}
+  .entity-header.locked{cursor:pointer;border-style:dashed;background:#fafbfd;}
+  .entity-header.locked .eh-name{color:var(--text-muted);}
+
+  /* ---------- Detail panel ----------
+     Mỗi khối (Sản phẩm/Khách hàng/Đối tác) luôn gồm đúng 2 "khối con" dạng .card, kích thước
+     BẰNG NHAU (flex:1) và KHÔNG co giãn theo nội dung — mỗi khối con tự cuộn bên trong
+     (.card-body) khi nội dung dài hơn chỗ hiển thị, giống nguyên tắc modal cao cố định của
+     app thật. detail-wrap không tự cuộn nữa (overflow:hidden), việc cuộn chuyển hẳn vào từng
+     .card-body. Kích thước/font trong khối con thu nhỏ để mỗi khối hiện được nhiều dòng hơn
+     trước khi phải cuộn. */
+  .detail-wrap{flex:1;min-height:0;display:flex;flex-direction:column;gap:8px;padding:0 10px 8px;overflow:hidden;}
+  .card{flex:1;min-height:0;background:var(--card-bg);border:1px solid var(--border);border-radius:14px;
+    display:flex;flex-direction:column;overflow:hidden;}
+  .card-head{flex:none;padding:9px 12px;border-bottom:1px solid var(--border);}
+  .card-head h3{margin:0;font-size:11.5px;font-weight:800;color:var(--navy);}
+  .card-head-row{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+  .card-body{flex:1;min-height:0;overflow-y:auto;padding:10px 12px;}
+  .card-foot{flex:none;padding:6px 12px 10px;border-top:1px solid var(--border);}
+  /* Khối con "khoá" khi chưa chọn/tạo đối tượng — cả khối là 1 vùng chạm lớn, mở popup tìm kiếm */
+  .locked-card{align-items:center;justify-content:center;cursor:pointer;border-style:dashed;background:#fafbfd;}
+  .locked-card:active{background:#f1f3f8;}
+  .locked-inner{display:flex;flex-direction:column;align-items:center;gap:5px;padding:16px;text-align:center;}
+  .locked-inner svg{width:18px;height:18px;color:var(--gray);}
+  .locked-title{font-size:11.5px;font-weight:800;color:var(--navy);}
+  .locked-sub{font-size:10px;color:var(--text-muted);max-width:220px;}
+  .field{margin-bottom:7px;}
+  .field label{display:block;font-size:10px;color:var(--text-muted);font-weight:700;margin-bottom:3px;}
+  .field input, .field select{
+    width:100%;border:1px solid var(--border);border-radius:8px;padding:7px 9px;
+    font-size:12.5px;background:#fbfbfd;color:var(--text-main);
+  }
+  .field input:focus{outline:none;border-color:var(--navy-2);background:#fff;}
+  .row-2{display:flex;gap:8px;}
+  .row-2 .field{flex:1;min-width:0;}
+  .phone-field{display:flex;gap:5px;}
+  .phone-field input{flex:1;}
+  .mini-icon-btn{width:30px;flex:none;border:1px solid var(--border);border-radius:8px;
+    background:#f6f7fb;display:flex;align-items:center;justify-content:center;color:var(--navy);text-decoration:none;}
+  .mini-icon-btn svg{width:14px;height:14px;}
+
+  .type-toggle{display:flex;gap:6px;}
+  .type-toggle button{flex:1;padding:6px 0;border-radius:8px;border:1.5px solid var(--navy);
+    background:#fff;color:var(--navy);font-weight:700;font-size:11.5px;}
+  .type-toggle button.active{background:var(--navy);color:#fff;}
+
+  .supplier-chip{display:flex;align-items:center;justify-content:space-between;
+    background:#f6f7fb;border:1px solid var(--border);border-radius:8px;padding:7px 9px;font-size:12px;}
+  .supplier-chip b{font-weight:700;}
+  .supplier-chip .chip-hint{font-size:10px;color:var(--text-muted);}
+
+  .search-inline-wrap{position:relative;margin-top:6px;}
+  .search-inline-wrap input{width:100%;border:1px solid var(--border);border-radius:8px;
+    padding:7px 9px 7px 30px;font-size:12px;background:#fbfbfd;}
+  .search-inline-wrap svg{position:absolute;left:9px;top:50%;transform:translateY(-50%);
+    width:12px;height:12px;color:var(--text-muted);}
+  .partner-pick-row{display:flex;align-items:center;gap:8px;padding:8px 3px;border-bottom:1px solid var(--border);}
+  .partner-pick-row:last-child{border-bottom:none;}
+  .partner-pick-row:active{background:#f6f7fb;}
+  .partner-pick-row .truck{width:22px;height:22px;border-radius:7px;background:#fdece0;color:#e08a2e;
+    display:flex;align-items:center;justify-content:center;flex:none;}
+  .partner-pick-row .truck svg{width:12px;height:12px;}
+  .partner-pick-row .ppr-name{font-size:12px;font-weight:700;}
+  .partner-pick-row .ppr-sub{font-size:10px;color:var(--text-muted);margin-top:1px;}
+  .partner-pick-row.selected{background:#fdf3d0;}
+
+  .btn-add-line{padding:5px 10px;border-radius:8px;border:1.5px dashed var(--gold-border);
+    background:#fffaf0;color:#b8860b;font-size:11px;font-weight:800;white-space:nowrap;flex:none;}
+  .empty-lines{font-size:11px;color:var(--text-muted);text-align:center;padding:10px 0;}
+  .order-line{border-bottom:1px solid var(--border);padding:8px 0;}
+  .order-line:last-child{border-bottom:none;}
+  .ol-top{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+  .ol-name{font-size:12px;font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .ol-del{border:none;background:none;color:var(--pink-text);flex:none;padding:2px;}
+  .ol-del svg{width:13px;height:13px;}
+  .ol-mid{display:flex;align-items:center;gap:8px;margin-top:6px;}
+  .qty-ctrl{display:flex;align-items:center;border:1px solid var(--border);border-radius:7px;overflow:hidden;flex:none;}
+  .qty-ctrl button{width:22px;height:22px;border:none;background:#f6f7fb;font-size:13px;color:var(--navy);}
+  .qty-ctrl input{width:28px;border:none;text-align:center;font-size:11.5px;padding:0;background:#fff;}
+  .ol-price{flex:1;min-width:0;}
+  .ol-price input{width:100%;border:1px solid var(--border);border-radius:7px;padding:5px 7px;font-size:11.5px;}
+  .ol-total{flex:none;font-size:12px;font-weight:800;color:var(--navy);min-width:68px;text-align:right;}
+  .ol-bottom{display:flex;align-items:center;gap:6px;margin-top:5px;flex-wrap:wrap;}
+  .stock-badge{font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:999px;background:var(--pink-bg);color:var(--pink-text);}
+  .stock-badge.ok{background:#e4f5ea;color:var(--green);}
+  .ref-price{font-size:9.5px;color:var(--text-muted);}
+
+  .order-total-row{display:flex;align-items:center;justify-content:space-between;
+    background:var(--navy);color:#fff;border-radius:10px;padding:10px 12px;font-weight:800;font-size:12.5px;margin-top:2px;}
+
+  /* ---------- Footer: cố định ngay trên thanh 5 icon, không cuộn theo nội dung ---------- */
+  .footer-actions{flex:none;display:flex;gap:8px;padding:8px 10px;}
+  .footer-actions button{flex:1;padding:11px 0;border-radius:10px;font-size:13.5px;font-weight:800;border:none;
+    display:flex;align-items:center;justify-content:center;gap:5px;}
+  .btn-huy{background:var(--pink-bg);color:var(--pink-text);}
+  .btn-chot{background:var(--navy);color:#fff;}
+  .footer-actions svg{width:14px;height:14px;}
+  .footer-actions.disabled button{opacity:.4;pointer-events:none;}
+
+  /* ---------- Bottom nav ---------- */
+  .bottom-nav{flex:none;display:flex;justify-content:space-around;padding:7px 4px 10px;border-top:1px solid var(--border);
+    background:#fff;}
+  .nav-item{display:flex;flex-direction:column;align-items:center;gap:3px;background:none;border:none;color:var(--text-muted);}
+  .nav-dot{width:29px;height:29px;border-radius:999px;background:#dfe4f5;display:flex;align-items:center;justify-content:center;color:var(--navy-2);}
+  .nav-dot svg{width:13px;height:13px;}
+  .nav-item span{font-size:9px;font-weight:600;}
+
+  /* ---------- Overlay: search popup ---------- */
+  .overlay{position:fixed;inset:0;background:rgba(15,20,35,.45);display:flex;align-items:flex-end;
+    justify-content:center;z-index:50;}
+  .overlay.hidden{display:none;}
+  .overlay-panel{width:100%;max-width:460px;background:#fff;border-radius:18px 18px 0 0;
+    max-height:82vh;display:flex;flex-direction:column;overflow:hidden;}
+  .overlay-header{display:flex;align-items:center;gap:8px;padding:12px 12px 8px;border-bottom:1px solid var(--border);}
+  .overlay-title{font-size:12px;font-weight:800;color:var(--navy);padding:0 12px;margin-top:8px;}
+  .overlay-search-wrap{flex:1;position:relative;}
+  .overlay-search-wrap svg{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:13px;height:13px;color:var(--text-muted);}
+  #overlaySearchInput{width:100%;border:1px solid var(--border);border-radius:8px;padding:9px 9px 9px 30px;font-size:12.5px;background:#f6f7fb;}
+  .overlay-close{width:30px;height:30px;flex:none;border-radius:999px;border:1px solid var(--border);background:#f6f7fb;
+    display:flex;align-items:center;justify-content:center;}
+  .overlay-close svg{width:12px;height:12px;}
+  .overlay-list{overflow-y:auto;padding:4px 6px 14px;}
+  .overlay-empty{text-align:center;color:var(--text-muted);font-size:12px;padding:24px 10px;}
+  .overlay-row{display:flex;align-items:center;gap:10px;padding:10px 8px;border-radius:10px;}
+  .overlay-row:active{background:#f6f7fb;}
+  .overlay-avatar{width:32px;height:32px;border-radius:8px;background:#eef1f6;color:var(--navy-2);
+    display:flex;align-items:center;justify-content:center;flex:none;font-weight:800;font-size:12px;}
+  .overlay-row-name{font-size:12.5px;font-weight:700;}
+  .overlay-row-sub{font-size:10.5px;color:var(--text-muted);margin-top:2px;}
+  .overlay-row-neg .overlay-row-name{color:var(--pink-text);}
+
+  /* ---------- Confirm modal ---------- */
+  .confirm-backdrop{position:fixed;inset:0;background:rgba(15,20,35,.5);display:flex;align-items:center;
+    justify-content:center;z-index:80;padding:20px;}
+  .confirm-backdrop.hidden{display:none;}
+  .confirm-box{background:#fff;border-radius:14px;padding:18px;max-width:320px;width:100%;text-align:center;}
+  .confirm-box p{font-size:12.5px;color:var(--text-main);margin:0 0 14px;line-height:1.5;}
+  .confirm-actions{display:flex;gap:8px;}
+  .confirm-actions button{flex:1;padding:10px 0;border-radius:8px;border:none;font-weight:700;font-size:12.5px;}
+  .confirm-no{background:#f0f1f5;color:var(--text-main);}
+  .confirm-yes{background:var(--navy);color:#fff;}
+
+  /* ---------- Toast ---------- */
+  #toastHost{position:fixed;bottom:14px;left:0;right:0;display:flex;flex-direction:column;align-items:center;
+    gap:8px;z-index:100;pointer-events:none;}
+  .toast{pointer-events:auto;background:#22273a;color:#fff;padding:9px 14px;border-radius:999px;
+    font-size:12px;display:flex;align-items:center;gap:10px;box-shadow:0 6px 18px rgba(0,0,0,.25);
+    animation:toastIn .18s ease;}
+  @keyframes toastIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+  .toast button{background:none;border:none;color:#f6c94c;font-weight:800;font-size:12px;}
+
+  /* ---------- Trang con: Kho hàng / Đơn bán / Đơn nhập / Công nợ ---------- */
+  .page-header{flex:none;display:flex;align-items:center;gap:8px;padding:10px 12px 6px;}
+  .back-btn{width:28px;height:28px;border-radius:999px;border:1px solid var(--border);background:#fff;
+    display:flex;align-items:center;justify-content:center;color:var(--navy);flex:none;}
+  .back-btn svg{width:14px;height:14px;}
+  .page-title{font-size:15px;font-weight:800;color:var(--navy);flex:1;}
+
+  .p1-card{flex:none;background:#fff;border:1px solid var(--border);border-radius:14px;margin:0 12px 8px;padding:10px 12px;}
+  .p1-row{display:flex;gap:8px;margin-bottom:8px;}
+  .p1-row:last-child{margin-bottom:0;}
+  .p1-row .field{flex:1;margin-bottom:0;}
+  .p1-stats{display:flex;gap:8px;}
+  .stat-box{flex:1;background:#f6f7fb;border-radius:10px;padding:8px 10px;min-width:0;}
+  .stat-label{font-size:9.5px;color:var(--text-muted);font-weight:700;}
+  .stat-value{font-size:13.5px;font-weight:800;color:var(--navy);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .stat-value.pos{color:var(--green);}
+  .stat-value.neg{color:var(--pink-text);}
+
+  .list-wrap{flex:1;min-height:0;overflow-y:auto;padding:0 12px 10px;display:flex;flex-direction:column;gap:8px;}
+  .list-empty{text-align:center;color:var(--text-muted);font-size:12px;padding:30px 10px;}
+
+  .order-card{background:#fff;border:1px solid var(--border);border-radius:14px;overflow:hidden;flex:none;}
+  .order-card-head{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;gap:8px;cursor:pointer;}
+  .order-card-title{font-size:12.5px;font-weight:800;color:var(--navy);}
+  .order-card-sub{font-size:10px;color:var(--text-muted);margin-top:1px;}
+  .order-status{font-size:9.5px;font-weight:800;padding:3px 8px;border-radius:999px;flex:none;white-space:nowrap;}
+  .order-status.moi{background:#fff4d6;color:#b8860b;}
+  .order-status.closed{background:#e4f5ea;color:var(--green);}
+  .order-status.cancelled{background:#f0f1f5;color:var(--text-muted);}
+  .order-card-body{border-top:1px solid var(--border);padding:8px 12px;}
+  .order-card-actions{display:flex;gap:6px;padding:8px 12px;border-top:1px solid var(--border);}
+  .order-card-actions button{flex:1;padding:7px 0;border-radius:8px;font-size:11px;font-weight:800;border:none;
+    display:flex;align-items:center;justify-content:center;gap:4px;}
+  .oca-cancel{background:var(--pink-bg);color:var(--pink-text);}
+  .oca-close{background:var(--navy);color:#fff;}
+  .oca-icon{background:#f6f7fb;color:var(--navy);flex:none;width:34px;padding:0;}
+  .oca-icon svg{width:13px;height:13px;}
+
+  .mini-line{display:flex;justify-content:space-between;gap:8px;font-size:11px;padding:3px 0;color:var(--text-main);}
+  .mini-line .ml-name{color:var(--text-muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .mini-line .ml-profit{color:var(--green);}
+  .mini-line .ml-loss{color:var(--pink-text);}
+
+  .kho-row{background:#fff;border:1px solid var(--border);border-radius:12px;padding:10px 12px;flex:none;}
+  .kho-row-top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;}
+  .kho-row-name{font-size:12.5px;font-weight:700;}
+  .kho-row-fields{display:flex;gap:8px;align-items:flex-end;}
+  .kho-row-fields .field{flex:1;margin-bottom:0;}
+  .kho-row-total{font-size:11px;color:var(--text-muted);margin-top:5px;}
+  .kho-row-hint{font-size:9.5px;color:var(--pink-text);margin-top:3px;}
+
+  .kho-footer{flex:none;padding:8px 12px;display:flex;align-items:center;gap:8px;}
+  .kho-footer-total{flex:1;background:var(--navy);color:#fff;border-radius:10px;padding:9px 12px;font-weight:800;font-size:12px;
+    display:flex;justify-content:space-between;align-items:center;min-width:0;}
+  .btn-kho-apply{flex:none;padding:0 16px;height:38px;border-radius:10px;border:none;background:var(--gold);color:var(--navy);
+    font-weight:800;font-size:12.5px;}
+  .btn-kho-apply:disabled{opacity:.4;pointer-events:none;}
+
+  .debt-tabs{display:flex;gap:6px;padding:0 12px 6px;flex:none;}
+  .debt-row{background:#fff;border:1px solid var(--border);border-radius:12px;padding:10px 12px;flex:none;}
+  .debt-row-top{display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer;}
+  .debt-name{font-size:12.5px;font-weight:700;}
+  .debt-sub{font-size:10px;color:var(--text-muted);margin-top:1px;}
+  .debt-amount{font-size:13px;font-weight:800;color:var(--pink-text);flex:none;}
+  .debt-amount.zero{color:var(--text-muted);}
+  .debt-detail{margin-top:9px;padding-top:9px;border-top:1px dashed var(--border);}
+  .debt-detail .row-2{margin-bottom:7px;}
+  .btn-debt-save{width:100%;padding:9px 0;border-radius:8px;border:none;background:var(--navy);color:#fff;
+    font-weight:800;font-size:12px;display:flex;align-items:center;justify-content:center;gap:5px;}
+  .btn-debt-save svg{width:13px;height:13px;}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toastHost"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ============================== ICONS ============================== */
+  const ICON = {
+    search:`<svg viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4.3-4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+    close:`<svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>`,
+    check:`<svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+    trash:`<svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-7 0v12a1 1 0 001 1h6a1 1 0 001-1V7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+    truck:`<svg viewBox="0 0 24 24" fill="none"><path d="M3 7h11v9H3V7zM14 11h4l3 3v2h-7v-5z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="7" cy="18" r="1.6" stroke="currentColor" stroke-width="1.6"/><circle cx="17.5" cy="18" r="1.6" stroke="currentColor" stroke-width="1.6"/></svg>`,
+    user:`<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.8"/><path d="M4 20c1.5-4 5-6 8-6s6.5 2 8 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`,
+    phone:`<svg viewBox="0 0 24 24" fill="none"><path d="M6 3h3l2 5-2.5 1.5a11 11 0 005 5L15 12l5 2v3a2 2 0 01-2 2C9.6 19 5 14.4 5 8a2 2 0 011-2z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>`,
+    fb:`<svg viewBox="0 0 24 24" fill="none"><path d="M14 8h2V5h-2a4 4 0 00-4 4v2H8v3h2v6h3v-6h2.2l.8-3H13V9a1 1 0 011-1z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>`,
+    power:`<svg viewBox="0 0 24 24" fill="none"><path d="M12 3v8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6.3 6.3a8 8 0 1011.4 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+    box:`<svg viewBox="0 0 24 24" fill="none"><path d="M21 8l-9-5-9 5 9 5 9-5zM3 8v8l9 5 9-5V8M12 13v8" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>`,
+    cart:`<svg viewBox="0 0 24 24" fill="none"><circle cx="9" cy="20" r="1.4" fill="currentColor"/><circle cx="18" cy="20" r="1.4" fill="currentColor"/><path d="M3 4h2l2.4 12h11.2L21 8H6" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>`,
+    inbox:`<svg viewBox="0 0 24 24" fill="none"><path d="M3 12h5l2 3h4l2-3h5" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M5 5h14l2 7v7H3v-7l2-7z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>`,
+    wallet:`<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="6" width="18" height="13" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M16 13h3" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>`,
+    chart:`<svg viewBox="0 0 24 24" fill="none"><path d="M4 20V10M11 20V4M18 20v-7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+    back:`<svg viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+    copy:`<svg viewBox="0 0 24 24" fill="none"><rect x="8" y="8" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M16 8V6a2 2 0 00-2-2H6a2 2 0 00-2 2v8a2 2 0 002 2h2" stroke="currentColor" stroke-width="1.8"/></svg>`,
+    send:`<svg viewBox="0 0 24 24" fill="none"><path d="M4 12l16-8-6 16-3-6-7-2z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>`,
+  };
+
+  /* ============================== MOCK DATA ============================== */
+  let uidSeq = 1000;
+  const uid = () => "id" + (uidSeq++);
+
+  const state = {
+    products: [
+      {id:"p1", name:"An cung hộp gỗ 60 viên", sell_price_retail:980000, sell_price_wholesale:900000, import_price:780000, stock_qty:12},
+      {id:"p2", name:"Canxi Citracal", sell_price_retail:320000, sell_price_wholesale:280000, import_price:230000, stock_qty:-3},
+      {id:"p3", name:"Sữa rửa mặt Cetaphil 500ml", sell_price_retail:450000, sell_price_wholesale:400000, import_price:320000, stock_qty:25},
+      {id:"p4", name:"Kem chống nắng Anessa", sell_price_retail:550000, sell_price_wholesale:480000, import_price:390000, stock_qty:8},
+      {id:"p5", name:"Nồi cơm điện Sharp 1.8L", sell_price_retail:1250000, sell_price_wholesale:1100000, import_price:950000, stock_qty:5},
+      {id:"p6", name:"Máy xay sinh tố Philips", sell_price_retail:890000, sell_price_wholesale:780000, import_price:650000, stock_qty:0},
+    ],
+    customers: [
+      {id:"c1", name:"Chị Tâm", phone:"0912345678", address:"45 ngách 42 ngõ 85 Hạ Đình", facebook_id:"", customer_type:"si", debt:1200000},
+      {id:"c2", name:"Đậu Quỳnh Anh", phone:"0987654321", address:"10 hẻm 24 ngách 159 ngõ 354 Trường Chinh", facebook_id:"", customer_type:"le", debt:0},
+      {id:"c3", name:"Bella Bùi", phone:"0975112233", address:"3/112 Trần Đại Nghĩa", facebook_id:"", customer_type:"le", debt:350000},
+    ],
+    partners: [
+      {id:"d1", name:"Quỳnh Vũ", address:"Chợ thuốc Hapulico", facebook_id:"", debt:2400000,
+        contacts:[{name:"Quỳnh Vũ", phone:"0901112222"},{name:"",phone:""}]},
+      {id:"d2", name:"Anh Kiên Cosmetics", address:"18 Nguyễn Trãi", facebook_id:"", debt:0,
+        contacts:[{name:"Anh Kiên", phone:"0933445566"},{name:"",phone:""}]},
+      {id:"d3", name:"Nhà phân phối Hòa Bình", address:"Khu CN Hòa Bình", facebook_id:"", debt:640000,
+        contacts:[{name:"",phone:""},{name:"",phone:""}]},
+    ],
+    // key `${partnerId}__${productId}` -> {price, quotedAt}
+    partnerPrices: {
+      "d1__p1": {price:760000, quotedAt:"2 ngày trước"},
+      "d1__p2": {price:220000, quotedAt:"5 ngày trước"},
+      "d2__p3": {price:315000, quotedAt:"hôm qua"},
+    },
+    // Đơn bán / đơn mua ĐÃ LƯU (chỉ cập nhật khi bấm Lưu ở khối Khách hàng/Đối tác, hoặc khi
+    // Chốt/Hủy ở màn Đơn bán/Đơn nhập) — mảng đầy đủ như sales_orders/purchase_orders thật,
+    // để màn Đơn bán/Đơn nhập liệt kê theo ngày + trạng thái. orderDate set ở phần INIT bên dưới
+    // (cần todayStr() đã định nghĩa).
+    salesOrders: [
+      {id:"so1", customerId:"c1", orderDate:null, status:"moi",
+        lines:[{productId:"p1", qty:1, sellPrice:900000, importPriceAtSale:780000}], createdAt:1},
+    ],
+    purchaseOrders: [],
+
+    pinned: "khach",           // 'sanpham' | 'khach' | 'doitac'
+    current: { sanpham:null, khach:null, doitac:null },
+    editBuffer: { sanpham:null, khach:null, doitac:null }, // form đang chỉnh (kể cả dòng đơn), chưa "Chốt"
+
+    overlay: { open:false, type:null, query:"", mode:"switch", contextLabel:"" },
+    confirm: null,             // {message, onYes}
+
+    page: "main",              // 'main' | 'kho' | 'donban' | 'donnhap' | 'congno'
+    khoQuery: "",
+    khoEdits: {},              // productId -> {import_price?, stock_qty?} — chỉnh chưa lưu
+    donbanDate: null, donbanQuery: "", donbanExpanded: null,
+    donnhapDate: null, donnhapQuery: "", donnhapExpanded: null,
+    debtTab: "khach", debtQuery: "", debtOpenId: null,
+  };
+
+  /* ============================== HELPERS ============================== */
+  const $ = sel => document.querySelector(sel);
+  const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const fmtVND = n => (Math.round(n||0)).toLocaleString("vi-VN") + "đ";
+  const todayStr = () => new Date(Date.now() + 7*60*60*1000).toISOString().slice(0,10);
+  const todayDisplay = (d) => { const [y,mo,da]=(d||todayStr()).split("-"); return `${da}/${mo}/${y}`; };
+
+  // Dữ liệu mồi cần todayStr() nên gán sau khi hàm đã tồn tại
+  state.salesOrders[0].orderDate = todayStr();
+  state.salesOrders[0].createdAt = Date.now();
+  state.donbanDate = todayStr();
+  state.donnhapDate = todayStr();
+
+  // Sắp 3 nhóm ưu tiên: Âm (âm nhiều nhất lên đầu) → Dương → =0, alphabet trong từng nhóm —
+  // dùng chung cho Sản phẩm/Kho hàng, đúng mục 6.15 tài liệu gốc.
+  function sortByStockPriority(list){
+    const neg = list.filter(p=>p.stock_qty<0).sort((a,b)=>a.stock_qty-b.stock_qty || a.name.localeCompare(b.name));
+    const pos = list.filter(p=>p.stock_qty>0).sort((a,b)=>a.name.localeCompare(b.name));
+    const zero = list.filter(p=>p.stock_qty===0).sort((a,b)=>a.name.localeCompare(b.name));
+    return [...neg, ...pos, ...zero];
+  }
+  // Tổng SL đang "giữ chỗ" cho các dòng đơn bán (nguồn kho) thuộc đơn CHƯA chốt — mục 6.12.
+  function getPendingKhoQtyMap(){
+    const map = {};
+    state.salesOrders.filter(o=>o.status==="moi").forEach(o=>{
+      o.lines.forEach(l=>{ map[l.productId] = (map[l.productId]||0) + l.qty; });
+    });
+    return map;
+  }
+  // Giá nhập trung bình từ mọi lần đã ghi trong partnerPrices — mục 5.7.
+  function avgImportPrice(productId){
+    const prices = Object.entries(state.partnerPrices).filter(([k])=>k.endsWith("__"+productId)).map(([,v])=>v.price);
+    if(!prices.length) return findProduct(productId).import_price;
+    return Math.round(prices.reduce((a,b)=>a+b,0)/prices.length);
+  }
+  const BANK_INFO = "1282666675 — BIDV, Chi nhánh Tràng Tiền, Hà Nội";
+  function buildBillText(order){
+    const cust = findCustomer(order.customerId);
+    const lines = order.lines.map(l=>{
+      const p = findProduct(l.productId);
+      return `${p.name} x${l.qty} = ${fmtVND(l.qty*l.sellPrice)}`;
+    }).join("\n");
+    const total = order.lines.reduce((s,l)=>s+l.qty*l.sellPrice,0);
+    return `${cust.name} — ${todayDisplay(order.orderDate)}\n${lines}\nTổng cộng: ${fmtVND(total)}\nChuyển khoản: ${BANK_INFO}`;
+  }
+
+  function blankProduct(){ return {id:null, name:"", sell_price_retail:"", sell_price_wholesale:"", import_price:"", stock_qty:0, supplierId:"kho", supplierQty:0, supplierPrice:""}; }
+  function blankCustomer(){ return {id:null, name:"", phone:"", address:"", facebook_id:"", customer_type:"le", lines:[]}; }
+  function blankPartner(){ return {id:null, name:"", address:"", facebook_id:"", contacts:[{name:"",phone:""},{name:"",phone:""}], lines:[]}; }
+
+  function findProduct(id){ return state.products.find(p=>p.id===id); }
+  function findCustomer(id){ return state.customers.find(c=>c.id===id); }
+  function findPartner(id){ return state.partners.find(p=>p.id===id); }
+
+  function lastPartnerPrice(partnerId, productId){
+    return state.partnerPrices[partnerId+"__"+productId] || null;
+  }
+
+  function toast(msg, undoFn){
+    const host = $("#toastHost");
+    const el = document.createElement("div");
+    el.className = "toast";
+    el.innerHTML = `<span>${esc(msg)}</span>` + (undoFn ? `<button type="button">Hoàn tác</button>` : "");
+    if(undoFn){
+      el.querySelector("button").addEventListener("click", ()=>{ undoFn(); el.remove(); });
+    }
+    host.appendChild(el);
+    setTimeout(()=>{ el.remove(); }, 6500);
+  }
+
+  function openConfirm(message, onYes){
+    state.confirm = {message, onYes};
+    render();
+  }
+
+  /* ============================== ĐƠN BÁN / ĐƠN MUA — nguồn "đã lưu" ============================== */
+  // Đơn nháp (status='moi') không giới hạn theo ngày tạo — tìm đơn moi GẦN NHẤT của khách/đối
+  // tác đó bất kể order_date, rồi tự cập nhật order_date về hôm nay nếu khác. Chưa có thì tạo
+  // mới — mục 6.7 tài liệu gốc.
+  function getDraftSO(customerId){
+    const list = state.salesOrders.filter(o=>o.customerId===customerId && o.status==="moi");
+    if(list.length){
+      const o = list.sort((a,b)=>b.createdAt-a.createdAt)[0];
+      if(o.orderDate !== todayStr()) o.orderDate = todayStr();
+      return o;
+    }
+    const o = {id:uid(), customerId, orderDate:todayStr(), status:"moi", lines:[], createdAt:Date.now()};
+    state.salesOrders.push(o);
+    return o;
+  }
+  function getDraftPO(partnerId){
+    const list = state.purchaseOrders.filter(o=>o.partnerId===partnerId && o.status==="moi");
+    if(list.length){
+      const o = list.sort((a,b)=>b.createdAt-a.createdAt)[0];
+      if(o.orderDate !== todayStr()) o.orderDate = todayStr();
+      return o;
+    }
+    const o = {id:uid(), partnerId, orderDate:todayStr(), status:"moi", lines:[], createdAt:Date.now()};
+    state.purchaseOrders.push(o);
+    return o;
+  }
+  // Chốt đơn bán — mục 7.1: cộng nợ khách (nếu tổng > 0), trừ thẳng stock_qty không giới hạn
+  // dưới 0, đặt status='closed'. An toàn khi gọi 2 lần (guard status).
+  function closeSalesOrder(order){
+    if(!order || order.status !== "moi") return;
+    const total = order.lines.reduce((s,l)=>s+l.qty*l.sellPrice,0);
+    if(total>0) findCustomer(order.customerId).debt = (findCustomer(order.customerId).debt||0) + total;
+    order.lines.forEach(l=>{ findProduct(l.productId).stock_qty -= l.qty; });
+    order.status = "closed";
+    return total;
+  }
+  // Chốt đơn mua — mục 7.2 (giản lược, demo không có dữ liệu pending_demand nên bỏ phần khớp
+  // cầu-cung, chỉ giữ phần luôn đúng: upsert partnerPrices, cập nhật import_price, cộng kho,
+  // cộng nợ đối tác).
+  function closePurchaseOrder(order){
+    if(!order || order.status !== "moi") return;
+    order.lines.forEach(l=>{
+      state.partnerPrices[order.partnerId+"__"+l.productId] = {price:l.importPrice, quotedAt:"vừa chốt"};
+      const p = findProduct(l.productId);
+      p.import_price = l.importPrice;
+      p.stock_qty += l.qty;
+    });
+    const total = order.lines.reduce((s,l)=>s+l.qty*l.importPrice,0);
+    if(total>0) findPartner(order.partnerId).debt = (findPartner(order.partnerId).debt||0) + total;
+    order.status = "closed";
+    return total;
+  }
+  function cancelOrder(order){ if(order && order.status==="moi") order.status = "cancelled"; }
+
+  /* ============================== EDIT-BUFFER LOADERS ============================== */
+  // Mỗi buffer là bản nháp tại chỗ (kể cả các dòng đơn) — chỉ ghi lại vào đơn hàng "đã lưu"
+  // (state.salesOrders/purchaseOrders) khi bấm Lưu. Hủy = nạp lại buffer từ nguồn đã lưu, coi
+  // như chưa từng sửa.
+  function loadProductBuffer(id){
+    if(!id) return blankProduct();
+    const p = findProduct(id);
+    return {id:p.id, name:p.name, sell_price_retail:p.sell_price_retail, sell_price_wholesale:p.sell_price_wholesale,
+      import_price:p.import_price, stock_qty:p.stock_qty, supplierId:"kho", supplierQty:0, supplierPrice:""};
+  }
+  function loadCustomerBuffer(id){
+    if(!id) return blankCustomer();
+    const c = findCustomer(id);
+    const so = getDraftSO(id);
+    return {id:c.id, name:c.name, phone:c.phone, address:c.address, facebook_id:c.facebook_id, customer_type:c.customer_type,
+      lines: so.lines.map(l=>({...l}))};
+  }
+  function loadPartnerBuffer(id){
+    if(!id) return blankPartner();
+    const p = findPartner(id);
+    const po = getDraftPO(id);
+    return {id:p.id, name:p.name, address:p.address, facebook_id:p.facebook_id,
+      contacts:[ {...p.contacts[0]}, {...p.contacts[1]} ],
+      lines: po.lines.map(l=>({...l}))};
+  }
+
+  /* ============================== ACTIONS: pin / load / new ============================== */
+  // Chuyển tab KHÔNG còn tự tạo bản nháp trống nữa — nếu khối đó chưa từng được chọn/tạo
+  // (editBuffer[type] === null) thì vẫn ở trạng thái "khoá", chỉ mở khi người dùng chủ động
+  // tìm (mở popup) hoặc bấm "+ Mới". Bản ghi đã chọn trước đó trong phiên vẫn được giữ nguyên
+  // khi quay lại tab (không bắt tìm lại).
+  function pinOnly(type){
+    state.pinned = type;
+    render();
+  }
+  function pinAndLoad(type, id){
+    state.pinned = type;
+    state.current[type] = id;
+    if(type==="sanpham") state.editBuffer.sanpham = loadProductBuffer(id);
+    if(type==="khach") state.editBuffer.khach = loadCustomerBuffer(id);
+    if(type==="doitac") state.editBuffer.doitac = loadPartnerBuffer(id);
+    render();
+  }
+  function newEntity(type){
+    state.pinned = type;
+    state.current[type] = null;
+    if(type==="sanpham") state.editBuffer.sanpham = blankProduct();
+    if(type==="khach") state.editBuffer.khach = blankCustomer();
+    if(type==="doitac") state.editBuffer.doitac = blankPartner();
+    render();
+  }
+
+  // Chỉ được gọi từ nút "+ Thêm sản phẩm" bên trong đơn nháp (khối Khách hàng/Đối tác đang mở) —
+  // không còn dùng chung với ô tìm kiếm của khối Sản phẩm nữa (khối đó giờ chỉ dùng để sửa/đổi sản phẩm).
+  function addProductToActiveOrder(productId){
+    const activeType = state.pinned;
+    const buf = state.editBuffer[activeType];
+    const product = findProduct(productId);
+    if(activeType==="khach"){
+      const price = buf.customer_type==="si" ? product.sell_price_wholesale : product.sell_price_retail;
+      const line = buf.lines.find(l=>l.productId===productId);
+      if(line){ line.qty += 1; } else { buf.lines.push({productId, qty:1, sellPrice: price || 0, importPriceAtSale: product.import_price}); }
+      toast("Đã thêm \"" + product.name + "\" vào đơn bán");
+    } else {
+      const lp = buf.id ? lastPartnerPrice(buf.id, productId) : null;
+      const price = lp ? lp.price : product.import_price;
+      const line = buf.lines.find(l=>l.productId===productId);
+      if(line){ line.qty += 1; } else { buf.lines.push({productId, qty:1, importPrice: price || 0}); }
+      toast("Đã thêm \"" + product.name + "\" vào đơn nhập");
+    }
+    render();
+  }
+
+  function recalcCustomerTypePrices(){
+    const buf = state.editBuffer.khach;
+    buf.lines.forEach(l=>{
+      const p = findProduct(l.productId);
+      l.sellPrice = buf.customer_type==="si" ? p.sell_price_wholesale : p.sell_price_retail;
+    });
+  }
+
+  /* ============================== CHỐT / HỦY ============================== */
+  function nameExists(list, name, excludeId){
+    const n = name.trim().toLowerCase();
+    return list.some(r => r.id!==excludeId && r.name.trim().toLowerCase()===n);
+  }
+  function chotLabel(){
+    return state.pinned==="sanpham" ? "Lưu sản phẩm" : state.pinned==="khach" ? "Lưu khách hàng" : "Lưu đối tác";
+  }
+
+  function doChot(){
+    const type = state.pinned;
+    if(!state.editBuffer[type]) return; // khối đang khoá (chưa chọn/tạo gì) — nút Lưu vô hiệu
+    if(type==="sanpham") return chotSanPham();
+    if(type==="khach") return chotKhach();
+    if(type==="doitac") return chotDoiTac();
+  }
+
+  function chotSanPham(){
+    const buf = state.editBuffer.sanpham;
+    if(!buf.name || !buf.name.trim()){ toast("Vui lòng nhập Tên sản phẩm"); return; }
+    const isNew = !buf.id;
+    if(isNew && nameExists(state.products, buf.name, null)){
+      openConfirm(`Đã có sản phẩm tên "${buf.name.trim()}". Vẫn tạo mới (trùng tên)?`, () => commitSanPham());
+      return;
+    }
+    commitSanPham();
+  }
+  function commitSanPham(){
+    const buf = state.editBuffer.sanpham;
+    let prev = null, prod;
+    if(buf.id){
+      prod = findProduct(buf.id);
+      prev = {...prod};
+    } else {
+      prod = {id: uid()};
+      state.products.push(prod);
+    }
+    prod.name = buf.name.trim();
+    prod.sell_price_retail = Number(buf.sell_price_retail)||0;
+    prod.sell_price_wholesale = Number(buf.sell_price_wholesale)||0;
+    prod.import_price = Number(buf.import_price)||0;
+    prod.stock_qty = Number(buf.stock_qty)||0;
+
+    let poMsg = "";
+    if(buf.supplierId && buf.supplierId!=="kho" && Number(buf.supplierQty)>0){
+      const pid = buf.supplierId;
+      const qty = Number(buf.supplierQty);
+      const price = Number(buf.supplierPrice) || prod.import_price;
+      const draft = getDraftPO(pid);
+      let line = draft.lines.find(l=>l.productId===prod.id);
+      if(line){ line.qty += qty; line.importPrice = price; }
+      else { draft.lines.push({productId: prod.id, qty, importPrice:price}); }
+      // đối tác này có thể đang mở sẵn (chưa Chốt) ở khối Đối tác — đồng bộ luôn để không lệch dữ liệu
+      if(state.editBuffer.doitac && state.editBuffer.doitac.id===pid){
+        const buf2 = state.editBuffer.doitac;
+        let l2 = buf2.lines.find(l=>l.productId===prod.id);
+        if(l2){ l2.qty += qty; l2.importPrice = price; }
+        else { buf2.lines.push({productId: prod.id, qty, importPrice:price}); }
+      }
+      poMsg = ` — đã thêm ${qty} vào đơn nhập nháp của ${findPartner(pid).name}`;
+    }
+
+    state.current.sanpham = prod.id;
+    state.editBuffer.sanpham = loadProductBuffer(prod.id);
+    toast(`Đã lưu sản phẩm "${prod.name}"${poMsg}`, prev ? ()=>{ Object.assign(prod, prev); state.editBuffer.sanpham = loadProductBuffer(prod.id); render(); } : null);
+    render();
+  }
+
+  function chotKhach(){
+    const buf = state.editBuffer.khach;
+    if(!buf.name || !buf.name.trim()){ toast("Vui lòng nhập Tên khách hàng"); return; }
+    const isNew = !buf.id;
+    if(isNew && nameExists(state.customers, buf.name, null)){
+      openConfirm(`Đã có khách hàng tên "${buf.name.trim()}". Vẫn tạo mới (trùng tên)?`, () => commitKhach());
+      return;
+    }
+    commitKhach();
+  }
+  function commitKhach(){
+    const buf = state.editBuffer.khach;
+    let prev = null, cust;
+    if(buf.id){ cust = findCustomer(buf.id); prev = {...cust}; }
+    else { cust = {id: uid(), debt:0}; state.customers.push(cust); }
+    cust.name = buf.name.trim();
+    cust.phone = buf.phone||"";
+    cust.address = buf.address||"";
+    cust.facebook_id = buf.facebook_id||"";
+    cust.customer_type = buf.customer_type;
+
+    getDraftSO(cust.id).lines = buf.lines.map(l=>({...l}));
+    state.current.khach = cust.id;
+    state.editBuffer.khach = loadCustomerBuffer(cust.id);
+    toast(`Đã lưu khách hàng "${cust.name}" & đơn bán nháp`, prev ? ()=>{ Object.assign(cust, prev); state.editBuffer.khach = loadCustomerBuffer(cust.id); render(); } : null);
+    render();
+  }
+
+  function chotDoiTac(){
+    const buf = state.editBuffer.doitac;
+    if(!buf.name || !buf.name.trim()){ toast("Vui lòng nhập Tên đối tác"); return; }
+    const isNew = !buf.id;
+    if(isNew && nameExists(state.partners, buf.name, null)){
+      openConfirm(`Đã có đối tác tên "${buf.name.trim()}". Vẫn tạo mới (trùng tên)?`, () => commitDoiTac());
+      return;
+    }
+    commitDoiTac();
+  }
+  function commitDoiTac(){
+    const buf = state.editBuffer.doitac;
+    let prev = null, partner;
+    if(buf.id){ partner = findPartner(buf.id); prev = {...partner, contacts:partner.contacts.map(c=>({...c}))}; }
+    else { partner = {id: uid(), debt:0}; state.partners.push(partner); }
+    partner.name = buf.name.trim();
+    partner.address = buf.address||"";
+    partner.facebook_id = buf.facebook_id||"";
+    partner.contacts = buf.contacts.map(c=>({...c}));
+
+    getDraftPO(partner.id).lines = buf.lines.map(l=>({...l}));
+    state.current.doitac = partner.id;
+    state.editBuffer.doitac = loadPartnerBuffer(partner.id);
+    toast(`Đã lưu đối tác "${partner.name}" & đơn nhập nháp`, prev ? ()=>{ Object.assign(partner, prev); state.editBuffer.doitac = loadPartnerBuffer(partner.id); render(); } : null);
+    render();
+  }
+
+  function doHuy(){
+    const type = state.pinned;
+    if(!state.editBuffer[type]) return; // khối đang khoá (chưa chọn/tạo gì) — nút Hủy vô hiệu
+    openConfirm("Hủy các thay đổi chưa lưu ở khối này?", () => {
+      if(type==="sanpham") state.editBuffer.sanpham = loadProductBuffer(state.current.sanpham);
+      if(type==="khach") state.editBuffer.khach = loadCustomerBuffer(state.current.khach);
+      if(type==="doitac") state.editBuffer.doitac = loadPartnerBuffer(state.current.doitac);
+      toast("Đã hủy thay đổi");
+      render();
+    });
+  }
+
+  /* ============================== RENDER ============================== */
+  function render(){
+    const app = $("#app");
+    let body;
+    if(state.page==="kho") body = renderKhoPage();
+    else if(state.page==="donban") body = renderDonBanPage();
+    else if(state.page==="donnhap") body = renderDonNhapPage();
+    else if(state.page==="congno") body = renderCongNoPage();
+    else body = renderMainPage();
+    app.innerHTML = body + renderBottomNav() + renderOverlay() + renderConfirmHtml();
+    wireEvents();
+  }
+
+  function renderMainPage(){
+    return `
+      ${renderTopbar()}
+      ${renderTabbar()}
+      ${renderEntityHeader()}
+      <div class="detail-wrap">${renderDetail()}</div>
+      ${renderFooter()}
+    `;
+  }
+
+  function renderPageHeader(title){
+    return `
+    <div class="page-header">
+      <button type="button" class="back-btn" data-action="nav-back">${ICON.back}</button>
+      <div class="page-title">${esc(title)}</div>
+      <span class="today">${todayDisplay()}</span>
+    </div>`;
+  }
+
+  function renderTopbar(){
+    return `
+    <div class="topbar">
+      <div class="shop-name">JUN SUPER SALE</div>
+      <div class="topbar-right">
+        <span class="today">${todayDisplay()}</span>
+        <button class="icon-btn" data-action="logout">${ICON.power}</button>
+      </div>
+    </div>`;
+  }
+
+  function renderTabbar(){
+    const defs = [
+      ["sanpham","Sản phẩm", ICON.box],
+      ["khach","Khách hàng", ICON.user],
+      ["doitac","Đối tác", ICON.truck],
+    ];
+    return `<div class="tabbar">` + defs.map(([type,label,icon])=>`
+      <button type="button" class="tab ${state.pinned===type?'active':''}" data-action="pin" data-type="${type}">${icon}<span>${label}</span></button>
+    `).join("") + `</div>`;
+  }
+
+  const ENTITY_LABEL = { sanpham:"sản phẩm", khach:"khách hàng", doitac:"đối tác" };
+
+  function renderEntityHeader(){
+    const type = state.pinned;
+    const buf = state.editBuffer[type];
+    if(!buf){
+      return `
+      <div class="entity-header locked" data-action="open-search" data-type="${type}">
+        <div class="eh-info">
+          <div class="eh-name">Chưa chọn ${ENTITY_LABEL[type]}</div>
+          <div class="eh-sub">Chạm để tìm, hoặc bấm "+ Mới"</div>
+        </div>
+        <div class="eh-actions">
+          <button type="button" data-action="open-search" data-type="${type}">Tìm</button>
+          <button type="button" class="primary" data-action="new-entity" data-type="${type}">+ Mới</button>
+        </div>
+      </div>`;
+    }
+    let name, sub;
+    if(type==="sanpham"){
+      name = buf.id ? buf.name : "Sản phẩm mới";
+      sub = buf.id ? `Tồn kho: ${buf.stock_qty}${buf.stock_qty<0?' (âm)':''} · Bán lẻ ${fmtVND(buf.sell_price_retail)}` : "Điền thông tin bên dưới rồi bấm Lưu";
+    } else if(type==="khach"){
+      const c = buf.id ? findCustomer(buf.id) : null;
+      name = buf.id ? buf.name : "Khách hàng mới";
+      sub = buf.id ? `${buf.phone||'—'} · ${buf.customer_type==='si'?'Bán sỉ':'Bán lẻ'}${c && c.debt>0 ? ' · Nợ '+fmtVND(c.debt) : ''}` : "Điền thông tin bên dưới rồi bấm Lưu";
+    } else {
+      const p = buf.id ? findPartner(buf.id) : null;
+      name = buf.id ? buf.name : "Đối tác mới";
+      sub = buf.id ? `${buf.address||'—'}${p && p.debt>0 ? ' · Nợ '+fmtVND(p.debt) : ''}` : "Điền thông tin bên dưới rồi bấm Lưu";
+    }
+    return `
+    <div class="entity-header">
+      <div class="eh-info">
+        <div class="eh-name">${esc(name)}</div>
+        <div class="eh-sub">${esc(sub)}</div>
+      </div>
+      <div class="eh-actions">
+        <button type="button" data-action="open-search" data-type="${type}">Đổi</button>
+        <button type="button" class="primary" data-action="new-entity" data-type="${type}">+ Mới</button>
+      </div>
+    </div>`;
+  }
+
+  const LOCKED_CARD2 = {
+    sanpham: {title:"Đối tác cung cấp", hint:"Chọn hoặc tạo sản phẩm trước để xem đối tác cung cấp"},
+    khach: {title:"Chi tiết đơn bán", hint:"Chọn hoặc tạo khách hàng trước để soạn đơn bán"},
+    doitac: {title:"Chi tiết đơn nhập", hint:"Chọn hoặc tạo đối tác trước để soạn đơn nhập"},
+  };
+  function renderLockedDetail(type){
+    const label = ENTITY_LABEL[type];
+    const c2 = LOCKED_CARD2[type];
+    return `
+    <div class="card locked-card" data-action="open-search" data-type="${type}">
+      <div class="locked-inner">
+        ${ICON.search}
+        <div class="locked-title">Chưa chọn ${label}</div>
+        <div class="locked-sub">Chạm để tìm ${label}, hoặc bấm "+ Mới" ở trên</div>
+      </div>
+    </div>
+    <div class="card locked-card" data-action="open-search" data-type="${type}">
+      <div class="locked-inner">
+        ${ICON.search}
+        <div class="locked-title">${c2.title}</div>
+        <div class="locked-sub">${c2.hint}</div>
+      </div>
+    </div>`;
+  }
+
+  function renderDetail(){
+    const type = state.pinned;
+    if(!state.editBuffer[type]) return renderLockedDetail(type);
+    if(type==="sanpham") return renderProductDetail();
+    if(type==="khach") return renderCustomerDetail();
+    if(type==="doitac") return renderPartnerDetail();
+    return "";
+  }
+
+  function renderProductDetail(){
+    const buf = state.editBuffer.sanpham;
+    const supplierName = buf.supplierId==="kho" ? "Trong kho" : (findPartner(buf.supplierId)||{}).name || "Trong kho";
+    return `
+    <div class="card">
+      <div class="card-head"><h3>Thông tin sản phẩm</h3></div>
+      <div class="card-body">
+        <div class="field">
+          <label>Tên sản phẩm</label>
+          <input type="text" data-field="name" value="${esc(buf.name)}" placeholder="Vd: Sữa rửa mặt Cetaphil...">
+        </div>
+        <div class="row-2">
+          <div class="field">
+            <label>Đối tác</label>
+            <div class="supplier-chip"><b>${esc(supplierName)}</b></div>
+          </div>
+          ${buf.supplierId!=="kho" ? `
+          <div class="field">
+            <label>SL nhập</label>
+            <div class="qty-ctrl">
+              <button type="button" data-action="qty-supplier" data-delta="-1">−</button>
+              <input type="number" data-field="supplierQty" value="${buf.supplierQty}">
+              <button type="button" data-action="qty-supplier" data-delta="1">+</button>
+            </div>
+          </div>` : `<div class="field"><label>&nbsp;</label><div style="font-size:11.5px;color:var(--text-muted);padding-top:8px;">Chọn đối tác ở khối bên dưới để nhập hàng</div></div>`}
+        </div>
+        <div class="row-2">
+          <div class="field">
+            <label>Giá nhập</label>
+            <input type="number" data-field="import_price" value="${buf.import_price}">
+          </div>
+          <div class="field">
+            <label>SL trong kho</label>
+            <div class="qty-ctrl">
+              <button type="button" data-action="qty-stock" data-delta="-1">−</button>
+              <input type="number" data-field="stock_qty" value="${buf.stock_qty}">
+              <button type="button" data-action="qty-stock" data-delta="1">+</button>
+            </div>
+          </div>
+        </div>
+        <div class="row-2">
+          <div class="field">
+            <label>Giá bán lẻ</label>
+            <input type="number" data-field="sell_price_retail" value="${buf.sell_price_retail}">
+          </div>
+          <div class="field">
+            <label>Giá bán sỉ</label>
+            <input type="number" data-field="sell_price_wholesale" value="${buf.sell_price_wholesale}">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>Đối tác cung cấp</h3>
+        <div class="search-inline-wrap">
+          ${ICON.search}
+          <input type="text" id="supplierLocalSearch" placeholder="Gõ tên đối tác để tìm...">
+        </div>
+      </div>
+      <div class="card-body" id="supplierPickList" style="padding:4px 14px;"></div>
+    </div>`;
+  }
+
+  function renderCustomerDetail(){
+    const buf = state.editBuffer.khach;
+    const lines = buf.lines;
+    const total = lines.reduce((s,l)=> s + l.qty*l.sellPrice, 0);
+    return `
+    <div class="card">
+      <div class="card-head"><h3>Thông tin khách hàng</h3></div>
+      <div class="card-body">
+        <div class="field">
+          <label>Tên khách hàng</label>
+          <div style="display:flex;gap:8px;">
+            <input type="text" data-field="name" value="${esc(buf.name)}" placeholder="Tên khách hàng" style="flex:1;">
+            <div class="type-toggle" style="width:150px;">
+              <button type="button" data-action="set-ctype" data-val="le" class="${buf.customer_type==='le'?'active':''}">Bán lẻ</button>
+              <button type="button" data-action="set-ctype" data-val="si" class="${buf.customer_type==='si'?'active':''}">Bán sỉ</button>
+            </div>
+          </div>
+        </div>
+        <div class="field">
+          <label>Số điện thoại</label>
+          <div class="phone-field">
+            <input type="text" data-field="phone" value="${esc(buf.phone)}" placeholder="09xx xxx xxx">
+            <a class="mini-icon-btn" href="${buf.phone?('tel:'+buf.phone):'#'}" title="Gọi">${ICON.phone}</a>
+          </div>
+        </div>
+        <div class="field">
+          <label>Địa chỉ</label>
+          <input type="text" data-field="address" value="${esc(buf.address)}" placeholder="Địa chỉ">
+        </div>
+        <div class="field">
+          <label>ID Facebook</label>
+          <div class="phone-field">
+            <input type="text" data-field="facebook_id" value="${esc(buf.facebook_id)}" placeholder="Link/ID Facebook">
+            <button type="button" class="mini-icon-btn" data-action="open-fb">${ICON.fb}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div class="card-head-row">
+          <h3>Chi tiết đơn bán</h3>
+          <button type="button" class="btn-add-line" data-action="add-line-search">+ Thêm sản phẩm</button>
+        </div>
+      </div>
+      <div class="card-body">${renderOrderLines(lines, "so")}</div>
+      ${lines.length ? `<div class="card-foot"><div class="order-total-row"><span>Tổng tiền đơn</span><span>${fmtVND(total)}</span></div></div>` : ""}
+    </div>`;
+  }
+
+  function renderPartnerDetail(){
+    const buf = state.editBuffer.doitac;
+    const lines = buf.lines;
+    const total = lines.reduce((s,l)=> s + l.qty*l.importPrice, 0);
+    return `
+    <div class="card">
+      <div class="card-head"><h3>Thông tin đối tác</h3></div>
+      <div class="card-body">
+        <div class="field">
+          <label>Tên đối tác</label>
+          <input type="text" data-field="name" value="${esc(buf.name)}" placeholder="Tên đối tác">
+        </div>
+        <div class="field">
+          <label>Người liên hệ 1</label>
+          <div class="phone-field">
+            <input type="text" data-field="contact0name" value="${esc(buf.contacts[0].name)}" placeholder="Tên" style="flex:1.2;">
+            <input type="text" data-field="contact0phone" value="${esc(buf.contacts[0].phone)}" placeholder="SĐT">
+            <a class="mini-icon-btn" href="${buf.contacts[0].phone?('tel:'+buf.contacts[0].phone):'#'}" title="Gọi">${ICON.phone}</a>
+          </div>
+        </div>
+        <div class="field">
+          <label>Người liên hệ 2 (tuỳ chọn)</label>
+          <div class="phone-field">
+            <input type="text" data-field="contact1name" value="${esc(buf.contacts[1].name)}" placeholder="Tên" style="flex:1.2;">
+            <input type="text" data-field="contact1phone" value="${esc(buf.contacts[1].phone)}" placeholder="SĐT">
+          </div>
+        </div>
+        <div class="field">
+          <label>Địa chỉ</label>
+          <input type="text" data-field="address" value="${esc(buf.address)}" placeholder="Địa chỉ">
+        </div>
+        <div class="field">
+          <label>ID Facebook</label>
+          <div class="phone-field">
+            <input type="text" data-field="facebook_id" value="${esc(buf.facebook_id)}" placeholder="Link/ID Facebook">
+            <button type="button" class="mini-icon-btn" data-action="open-fb">${ICON.fb}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div class="card-head-row">
+          <h3>Chi tiết đơn nhập</h3>
+          <button type="button" class="btn-add-line" data-action="add-line-search">+ Thêm sản phẩm</button>
+        </div>
+      </div>
+      <div class="card-body">${renderOrderLines(lines, "po")}</div>
+      ${lines.length ? `<div class="card-foot"><div class="order-total-row"><span>Tổng tiền đơn</span><span>${fmtVND(total)}</span></div></div>` : ""}
+    </div>`;
+  }
+
+  function renderOrderLines(lines, kind){
+    if(!lines.length){
+      return `<div class="empty-lines">Chưa có sản phẩm nào — bấm "+ Thêm sản phẩm" ở trên để thêm vào đơn.</div>`;
+    }
+    return lines.map((l,idx)=>{
+      const p = findProduct(l.productId);
+      const price = kind==="so" ? l.sellPrice : l.importPrice;
+      const total = l.qty * price;
+      const stockOk = p.stock_qty >= l.qty;
+      const refLabel = kind==="so" ? `Giá nhập TB: ${fmtVND(p.import_price)}` : `Giá nhập gần nhất: ${fmtVND(p.import_price)}`;
+      return `
+      <div class="order-line" data-idx="${idx}">
+        <div class="ol-top">
+          <div class="ol-name">${esc(p.name)}</div>
+          <button type="button" class="ol-del" data-action="del-line" data-kind="${kind}" data-idx="${idx}">${ICON.trash}</button>
+        </div>
+        <div class="ol-mid">
+          <div class="qty-ctrl">
+            <button type="button" data-action="line-qty" data-kind="${kind}" data-idx="${idx}" data-delta="-1">−</button>
+            <input type="number" data-action="line-qty-input" data-kind="${kind}" data-idx="${idx}" value="${l.qty}">
+            <button type="button" data-action="line-qty" data-kind="${kind}" data-idx="${idx}" data-delta="1">+</button>
+          </div>
+          <div class="ol-price"><input type="number" data-action="line-price" data-kind="${kind}" data-idx="${idx}" value="${price}"></div>
+          <div class="ol-total">${fmtVND(total)}</div>
+        </div>
+        <div class="ol-bottom">
+          <span class="stock-badge ${stockOk?'ok':''}">Tồn kho: ${p.stock_qty}${p.stock_qty<0?' (âm)':''}</span>
+          <span class="ref-price">${refLabel}</span>
+        </div>
+      </div>`;
+    }).join("");
+  }
+
+  function renderFooter(){
+    const locked = !state.editBuffer[state.pinned];
+    return `
+    <div class="footer-actions ${locked?'disabled':''}">
+      <button class="btn-huy" data-action="huy" ${locked?'disabled':''}>${ICON.close} Hủy</button>
+      <button class="btn-chot" data-action="chot" ${locked?'disabled':''}>${ICON.check} ${chotLabel()}</button>
+    </div>`;
+  }
+
+  /* ============================== TRANG: KHO HÀNG (mục 5.7) ============================== */
+  function khoVisibleProducts(){
+    const q = state.khoQuery.trim().toLowerCase();
+    let list = q ? state.products.filter(p=>p.name.toLowerCase().includes(q))
+                 : state.products.filter(p=>p.stock_qty !== 0);
+    return sortByStockPriority(list);
+  }
+  function khoRowHtml(p){
+    const edit = state.khoEdits[p.id] || {};
+    const importPrice = edit.import_price!=null ? edit.import_price : avgImportPrice(p.id);
+    const stockQty = edit.stock_qty!=null ? edit.stock_qty : p.stock_qty;
+    const reserved = (getPendingKhoQtyMap()[p.id])||0;
+    const lineTotal = stockQty>0 ? stockQty*importPrice : 0;
+    return `
+    <div class="kho-row">
+      <div class="kho-row-top">
+        <div class="kho-row-name">${esc(p.name)}</div>
+        ${p.stock_qty<0 ? `<span class="stock-badge">Âm ${Math.abs(p.stock_qty)} — cần mua bù</span>` : ""}
+      </div>
+      <div class="kho-row-fields">
+        <div class="field">
+          <label>Giá nhập (TB)</label>
+          <input type="number" data-action="kho-field" data-id="${p.id}" data-field="import_price" value="${importPrice}">
+        </div>
+        <div class="field">
+          <label>Số lượng</label>
+          <input type="number" data-action="kho-field" data-id="${p.id}" data-field="stock_qty" value="${stockQty}">
+        </div>
+      </div>
+      <div class="kho-row-total" data-kho-total="${p.id}">Thành tiền: ${fmtVND(lineTotal)}</div>
+      ${reserved>0 ? `<div class="kho-row-hint">Đang giữ chỗ ${reserved} cho đơn chưa chốt — không thể để tồn kho dưới mức này</div>` : ""}
+    </div>`;
+  }
+  function khoRowsHtml(){
+    const list = khoVisibleProducts();
+    if(!list.length) return `<div class="list-empty">Không có sản phẩm nào khớp.</div>`;
+    return list.map(khoRowHtml).join("");
+  }
+  function khoTotal(){
+    let total = 0;
+    khoVisibleProducts().forEach(p=>{
+      const edit = state.khoEdits[p.id] || {};
+      const importPrice = edit.import_price!=null ? edit.import_price : avgImportPrice(p.id);
+      const stockQty = edit.stock_qty!=null ? edit.stock_qty : p.stock_qty;
+      if(stockQty>0) total += stockQty*importPrice;
+    });
+    return total;
+  }
+  function renderKhoPage(){
+    const hasChanges = Object.keys(state.khoEdits).length>0;
+    return `
+    ${renderPageHeader("Kho hàng")}
+    <div class="p1-card">
+      <div class="search-inline-wrap" style="margin-top:0;">
+        ${ICON.search}
+        <input type="text" id="khoSearchInput" placeholder="Tìm sản phẩm..." value="${esc(state.khoQuery)}">
+      </div>
+      <div style="font-size:9.5px;color:var(--text-muted);margin-top:6px;">Mặc định hiện sản phẩm còn tồn hoặc đang âm — gõ tìm để thấy cả sản phẩm hết hàng (0)</div>
+    </div>
+    <div class="list-wrap" id="khoList">${khoRowsHtml()}</div>
+    <div class="kho-footer">
+      <div class="kho-footer-total"><span>Tổng tiền hàng tồn kho</span><span id="khoTotalValue">${fmtVND(khoTotal())}</span></div>
+      <button type="button" class="btn-kho-apply" data-action="kho-apply" ${hasChanges?'':'disabled'}>Cập nhật</button>
+    </div>`;
+  }
+
+  /* ============================== TRANG: ĐƠN BÁN (mục 5.5) ============================== */
+  function donBanOrdersOfDay(){
+    const viewingToday = state.donbanDate === todayStr();
+    return state.salesOrders.filter(o=>{
+      const total = o.lines.reduce((s,l)=>s+l.qty*l.sellPrice,0);
+      if(total<=0) return false;
+      // Đơn nháp (moi) không giới hạn theo ngày tạo — luôn hiện ở ngày HÔM NAY bất kể order_date
+      // lưu trữ là ngày nào (mục 6.7/7 tài liệu gốc: đơn chưa chốt không bị "kẹt" ở ngày cũ).
+      // Tra cứu 1 ngày quá khứ chỉ hiện đơn đã chốt thành công — đơn moi không xuất hiện lùi
+      // về quá khứ, và đơn cancelled không bao giờ hiện dù ở ngày nào.
+      if(o.status==="moi") return viewingToday;
+      if(o.status==="closed") return o.orderDate === state.donbanDate;
+      return false;
+    });
+  }
+  function donBanStats(){
+    const orders = donBanOrdersOfDay();
+    let sold=0, profit=0;
+    orders.forEach(o=>o.lines.forEach(l=>{
+      sold += l.qty*l.sellPrice;
+      profit += l.qty*(l.sellPrice-(l.importPriceAtSale||0));
+    }));
+    return {sold, profit};
+  }
+  function donBanFilteredOrders(){
+    const q = state.donbanQuery.trim().toLowerCase();
+    return donBanOrdersOfDay().filter(o=>{
+      if(!q) return true;
+      const c = findCustomer(o.customerId);
+      return c.name.toLowerCase().includes(q) || (c.phone||"").includes(q);
+    }).sort((a,b)=>b.createdAt-a.createdAt);
+  }
+  function donBanCardHtml(o){
+    const cust = findCustomer(o.customerId);
+    const total = o.lines.reduce((s,l)=>s+l.qty*l.sellPrice,0);
+    const profit = o.lines.reduce((s,l)=>s+l.qty*(l.sellPrice-(l.importPriceAtSale||0)),0);
+    const expanded = state.donbanExpanded===o.id;
+    return `
+    <div class="order-card">
+      <div class="order-card-head" data-action="donban-toggle" data-id="${o.id}">
+        <div style="min-width:0;">
+          <div class="order-card-title">${esc(cust.name)}</div>
+          <div class="order-card-sub">${o.lines.length} sản phẩm · ${fmtVND(total)} · Lãi ${fmtVND(profit)}</div>
+        </div>
+        <span class="order-status ${o.status}">${o.status==="moi"?"Mới":o.status==="closed"?"Đã chốt":"Đã hủy"}</span>
+      </div>
+      ${expanded ? `<div class="order-card-body">${o.lines.map(l=>{
+        const p = findProduct(l.productId);
+        const lineProfit = l.qty*(l.sellPrice-(l.importPriceAtSale||0));
+        return `<div class="mini-line"><span class="ml-name">${esc(p.name)} ×${l.qty}</span><span>${fmtVND(l.qty*l.sellPrice)}</span><span class="${lineProfit>=0?'ml-profit':'ml-loss'}">${lineProfit>=0?'+':''}${fmtVND(lineProfit)}</span></div>`;
+      }).join("")}</div>` : ""}
+      <div class="order-card-actions">
+        ${o.status==="moi" ? `
+          <button type="button" class="oca-cancel" data-action="donban-cancel" data-id="${o.id}">Hủy</button>
+          <button type="button" class="oca-close" data-action="donban-close" data-id="${o.id}">Chốt</button>
+        ` : ""}
+        <button type="button" class="oca-icon" data-action="donban-copy" data-id="${o.id}" title="Copy bill">${ICON.copy}</button>
+        <button type="button" class="oca-icon" data-action="donban-zalo" data-id="${o.id}" title="Zalo/Facebook">${ICON.send}</button>
+      </div>
+    </div>`;
+  }
+  function donBanListHtml(){
+    const orders = donBanFilteredOrders();
+    if(!orders.length) return `<div class="list-empty">Không có đơn bán nào ngày này.</div>`;
+    return orders.map(donBanCardHtml).join("");
+  }
+  function renderDonBanPage(){
+    const {sold, profit} = donBanStats();
+    return `
+    ${renderPageHeader("Đơn bán")}
+    <div class="p1-card">
+      <div class="p1-row">
+        <div class="field"><label>Ngày</label><input type="date" id="donbanDateInput" value="${state.donbanDate}"></div>
+        <div class="field"><label>Tìm khách hàng</label><input type="text" id="donbanSearchInput" placeholder="Tên/SĐT..." value="${esc(state.donbanQuery)}"></div>
+      </div>
+      <div class="p1-stats">
+        <div class="stat-box"><div class="stat-label">TỔNG TIỀN BÁN</div><div class="stat-value" id="donbanSoldValue">${fmtVND(sold)}</div></div>
+        <div class="stat-box"><div class="stat-label">LÃI / LỖ</div><div class="stat-value ${profit>=0?'pos':'neg'}" id="donbanProfitValue">${fmtVND(profit)}</div></div>
+      </div>
+    </div>
+    <div class="list-wrap" id="donbanList">${donBanListHtml()}</div>`;
+  }
+
+  /* ============================== TRANG: ĐƠN NHẬP / HÀNG NHẬP (mục 5.6) ============================== */
+  function donNhapOrdersOfDay(){
+    const viewingToday = state.donnhapDate === todayStr();
+    return state.purchaseOrders.filter(o=>{
+      const total = o.lines.reduce((s,l)=>s+l.qty*l.importPrice,0);
+      if(total<=0) return false;
+      // Cùng luật với Đơn bán: đơn nháp (moi) luôn hiện ở ngày hôm nay bất kể order_date lưu
+      // trữ; tra cứu quá khứ chỉ hiện đơn đã chốt.
+      if(o.status==="moi") return viewingToday;
+      if(o.status==="closed") return o.orderDate === state.donnhapDate;
+      return false;
+    });
+  }
+  function donNhapTotal(){
+    let total=0;
+    donNhapOrdersOfDay().forEach(o=>o.lines.forEach(l=>{ total += l.qty*l.importPrice; }));
+    return total;
+  }
+  function donNhapFilteredOrders(){
+    const q = state.donnhapQuery.trim().toLowerCase();
+    return donNhapOrdersOfDay().filter(o=>{
+      if(!q) return true;
+      return findPartner(o.partnerId).name.toLowerCase().includes(q);
+    }).sort((a,b)=>b.createdAt-a.createdAt);
+  }
+  function donNhapCardHtml(o){
+    const partner = findPartner(o.partnerId);
+    const total = o.lines.reduce((s,l)=>s+l.qty*l.importPrice,0);
+    const expanded = state.donnhapExpanded===o.id;
+    return `
+    <div class="order-card">
+      <div class="order-card-head" data-action="donnhap-toggle" data-id="${o.id}">
+        <div style="min-width:0;">
+          <div class="order-card-title">${esc(partner.name)}</div>
+          <div class="order-card-sub">${o.lines.length} sản phẩm · ${fmtVND(total)}</div>
+        </div>
+        <span class="order-status ${o.status}">${o.status==="moi"?"Mới":o.status==="closed"?"Đã chốt":"Đã hủy"}</span>
+      </div>
+      ${expanded ? `<div class="order-card-body">${o.lines.map(l=>{
+        const p = findProduct(l.productId);
+        return `<div class="mini-line"><span class="ml-name">${esc(p.name)} ×${l.qty}</span><span>${fmtVND(l.qty*l.importPrice)}</span></div>`;
+      }).join("")}</div>` : ""}
+      ${o.status==="moi" ? `
+      <div class="order-card-actions">
+        <button type="button" class="oca-cancel" data-action="donnhap-cancel" data-id="${o.id}">Hủy</button>
+        <button type="button" class="oca-close" data-action="donnhap-close" data-id="${o.id}">Chốt</button>
+      </div>` : ""}
+    </div>`;
+  }
+  function donNhapListHtml(){
+    const orders = donNhapFilteredOrders();
+    if(!orders.length) return `<div class="list-empty">Không có đơn nhập nào ngày này.</div>`;
+    return orders.map(donNhapCardHtml).join("");
+  }
+  function renderDonNhapPage(){
+    return `
+    ${renderPageHeader("Đơn nhập")}
+    <div class="p1-card">
+      <div class="p1-row">
+        <div class="field"><label>Ngày</label><input type="date" id="donnhapDateInput" value="${state.donnhapDate}"></div>
+        <div class="field"><label>Tìm đối tác</label><input type="text" id="donnhapSearchInput" placeholder="Tên đối tác..." value="${esc(state.donnhapQuery)}"></div>
+      </div>
+      <div class="p1-stats">
+        <div class="stat-box"><div class="stat-label">TỔNG TIỀN MUA TỪ ĐỐI TÁC</div><div class="stat-value" id="donnhapTotalValue">${fmtVND(donNhapTotal())}</div></div>
+      </div>
+    </div>
+    <div class="list-wrap" id="donnhapList">${donNhapListHtml()}</div>`;
+  }
+
+  /* ============================== TRANG: QUẢN LÝ CÔNG NỢ (mục 5.9) ============================== */
+  const DEBT_CONFIRM_THRESHOLD = 2000000;
+  function debtEntities(){ return state.debtTab==="khach" ? state.customers : state.partners; }
+  function debtFilteredList(){
+    const q = state.debtQuery.trim().toLowerCase();
+    let list = debtEntities();
+    if(!q) list = list.filter(e=>(e.debt||0)>0);
+    else list = list.filter(e=>e.name.toLowerCase().includes(q));
+    return [...list].sort((a,b)=> (b.debt||0)-(a.debt||0));
+  }
+  function debtTotalStat(){
+    const list = debtEntities().filter(e=>(e.debt||0)>0);
+    return {count:list.length, amount:list.reduce((s,e)=>s+(e.debt||0),0)};
+  }
+  function debtRowHtml(e){
+    const open = state.debtOpenId===e.id;
+    const detail = open ? `
+      <div class="debt-detail">
+        <div class="row-2">
+          <div class="field"><label>Số tiền nợ</label><input type="number" data-debt-adjust="${e.id}" value="${e.debt||0}"></div>
+        </div>
+        <div class="row-2">
+          <div class="field"><label>Số tiền thanh toán</label><input type="number" data-debt-payment="${e.id}" placeholder="0"></div>
+          <div class="field"><label>Ngày thanh toán</label><input type="date" data-debt-date="${e.id}"></div>
+        </div>
+        <button type="button" class="btn-debt-save" data-action="debt-save" data-id="${e.id}">${ICON.check} Lưu</button>
+      </div>` : "";
+    return `
+    <div class="debt-row">
+      <div class="debt-row-top" data-action="debt-toggle" data-id="${e.id}">
+        <div style="min-width:0;">
+          <div class="debt-name">${esc(e.name)}</div>
+          <div class="debt-sub">${esc(e.phone||e.address||"")}</div>
+        </div>
+        <div class="debt-amount ${(e.debt||0)<=0?'zero':''}">${fmtVND(e.debt||0)}</div>
+      </div>
+      ${detail}
+    </div>`;
+  }
+  function debtListHtml(){
+    const list = debtFilteredList();
+    if(!list.length) return `<div class="list-empty">Không có ai đang nợ.</div>`;
+    return list.map(debtRowHtml).join("");
+  }
+  function renderCongNoPage(){
+    const stat = debtTotalStat();
+    return `
+    ${renderPageHeader("Quản lý công nợ")}
+    <div class="debt-tabs">
+      <button type="button" class="tab ${state.debtTab==='khach'?'active':''}" data-action="debt-tab" data-val="khach">${ICON.user}<span>Khách hàng</span></button>
+      <button type="button" class="tab ${state.debtTab==='doitac'?'active':''}" data-action="debt-tab" data-val="doitac">${ICON.truck}<span>Đối tác</span></button>
+    </div>
+    <div class="p1-card">
+      <div class="search-inline-wrap" style="margin-top:0;">
+        ${ICON.search}
+        <input type="text" id="debtSearchInput" placeholder="Tìm tên..." value="${esc(state.debtQuery)}">
+      </div>
+      <div class="p1-stats" style="margin-top:8px;">
+        <div class="stat-box"><div class="stat-label">${state.debtTab==='khach'?'TỔNG KHÁCH ĐANG NỢ':'TỔNG ĐỐI TÁC ĐANG NỢ'}</div><div class="stat-value">${stat.count} người</div></div>
+        <div class="stat-box"><div class="stat-label">TỔNG TIỀN ĐANG NỢ</div><div class="stat-value">${fmtVND(stat.amount)}</div></div>
+      </div>
+    </div>
+    <div class="list-wrap" id="debtList">${debtListHtml()}</div>`;
+  }
+
+  function renderBottomNav(){
+    const items = [
+      ["kho","Kho hàng", ICON.box],
+      ["donban","Đơn bán", ICON.cart],
+      ["donnhap","Đơn nhập", ICON.inbox],
+      ["congno","QL Công nợ", ICON.wallet],
+      ["baocao","Báo cáo", ICON.chart],
+    ];
+    return `<div class="bottom-nav">` + items.map(([key,label,icon])=>`
+      <button class="nav-item" data-action="nav-goto" data-page="${key}" data-label="${esc(label)}">
+        <span class="nav-dot" style="${state.page===key?'background:#fdf3d0;color:var(--navy)':''}">${icon}</span>
+        <span style="${state.page===key?'color:var(--navy);font-weight:800':''}">${label}</span>
+      </button>`).join("") + `</div>`;
+  }
+
+  /* ---------- overlay: search popup ---------- */
+  function overlayTitle(){
+    const {type, mode, contextLabel} = state.overlay;
+    if(mode==="addLine") return `Thêm vào đơn của "${contextLabel}"`;
+    return type==="sanpham" ? "Tìm / đổi sản phẩm" : type==="khach" ? "Tìm / đổi khách hàng" : "Tìm / đổi đối tác";
+  }
+  function overlayList(type, q){
+    const query = (q||"").trim().toLowerCase();
+    if(type==="sanpham"){
+      return state.products.filter(p => !query || p.name.toLowerCase().includes(query));
+    }
+    if(type==="khach"){
+      return state.customers.filter(c => !query || c.name.toLowerCase().includes(query) || (c.phone||"").includes(query));
+    }
+    return state.partners.filter(p => !query || p.name.toLowerCase().includes(query));
+  }
+  function overlayRowsHtml(){
+    const type = state.overlay.type;
+    const items = overlayList(type, state.overlay.query);
+    if(!items.length) return `<div class="overlay-empty">Không tìm thấy kết quả nào.</div>`;
+    return items.map(item=>{
+      const initials = item.name.trim().slice(0,1).toUpperCase();
+      let sub = "";
+      if(type==="sanpham") sub = `Tồn kho: ${item.stock_qty}${item.stock_qty<0?' (âm — cần mua bù)':''}`;
+      else if(type==="khach") sub = (item.phone||"—") + (item.debt>0 ? ` · Nợ ${fmtVND(item.debt)}` : "");
+      else sub = item.address || "";
+      return `
+      <button type="button" class="overlay-row ${item.stock_qty<0?'overlay-row-neg':''}" data-action="pick-overlay" data-id="${item.id}">
+        <div class="overlay-avatar">${esc(initials)}</div>
+        <div>
+          <div class="overlay-row-name">${esc(item.name)}</div>
+          <div class="overlay-row-sub">${esc(sub)}</div>
+        </div>
+      </button>`;
+    }).join("");
+  }
+  function renderOverlay(){
+    if(!state.overlay.open) return `<div class="overlay hidden"></div>`;
+    return `
+    <div class="overlay">
+      <div class="overlay-panel">
+        <div class="overlay-title">${esc(overlayTitle())}</div>
+        <div class="overlay-header">
+          <div class="overlay-search-wrap">
+            ${ICON.search}
+            <input id="overlaySearchInput" placeholder="Gõ để tìm..." value="${esc(state.overlay.query)}">
+          </div>
+          <button class="overlay-close" data-action="close-search">${ICON.close}</button>
+        </div>
+        <div class="overlay-list">${overlayRowsHtml()}</div>
+      </div>
+    </div>`;
+  }
+  function renderOverlayOnly(){
+    const list = document.querySelector(".overlay-list");
+    if(list) list.innerHTML = overlayRowsHtml();
+  }
+
+  /* ---------- confirm modal ---------- */
+  function renderConfirmHtml(){
+    if(!state.confirm) return `<div class="confirm-backdrop hidden"></div>`;
+    return `
+    <div class="confirm-backdrop">
+      <div class="confirm-box">
+        <p>${esc(state.confirm.message)}</p>
+        <div class="confirm-actions">
+          <button class="confirm-no" data-action="confirm-no">Không</button>
+          <button class="confirm-yes" data-action="confirm-yes">Có</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  /* ============================== EVENTS ============================== */
+  function wireEvents(){
+    const app = $("#app");
+
+    app.addEventListener("click", onAppClick);
+    app.addEventListener("input", onAppInput);
+    app.addEventListener("change", onAppInput);
+
+    const sInput = $("#overlaySearchInput");
+    if(sInput){
+      sInput.focus();
+      sInput.setSelectionRange(sInput.value.length, sInput.value.length);
+      sInput.addEventListener("input", (e)=>{
+        state.overlay.query = e.target.value;
+        renderOverlayOnly();
+      });
+    }
+    const supplierSearch = $("#supplierLocalSearch");
+    if(supplierSearch){
+      supplierSearch.addEventListener("input", renderSupplierPickList);
+      renderSupplierPickList();
+    }
+
+    // Các ô tìm/ngày ở 4 trang Kho hàng/Đơn bán/Đơn nhập/Công nợ — lọc cục bộ tức thời, chỉ
+    // patch riêng phần list-wrap để không mất focus/con trỏ khi đang gõ (giống overlay).
+    bindLocal("#khoSearchInput", (v)=>{ state.khoQuery=v; }, ()=>{ $("#khoList").innerHTML = khoRowsHtml(); });
+    bindLocal("#donbanSearchInput", (v)=>{ state.donbanQuery=v; }, ()=>{ $("#donbanList").innerHTML = donBanListHtml(); });
+    bindLocal("#donnhapSearchInput", (v)=>{ state.donnhapQuery=v; }, ()=>{ $("#donnhapList").innerHTML = donNhapListHtml(); });
+    bindLocal("#debtSearchInput", (v)=>{ state.debtQuery=v; }, ()=>{ $("#debtList").innerHTML = debtListHtml(); });
+    const donbanDate = $("#donbanDateInput");
+    if(donbanDate) donbanDate.addEventListener("change", e=>{ state.donbanDate = e.target.value; render(); });
+    const donnhapDate = $("#donnhapDateInput");
+    if(donnhapDate) donnhapDate.addEventListener("change", e=>{ state.donnhapDate = e.target.value; render(); });
+  }
+  function bindLocal(sel, setState, rerenderPart){
+    const el = $(sel);
+    if(!el) return;
+    el.addEventListener("input", e=>{ setState(e.target.value); rerenderPart(); });
+  }
+
+  function renderSupplierPickList(){
+    const box = $("#supplierPickList");
+    if(!box) return;
+    const q = ($("#supplierLocalSearch").value||"").trim().toLowerCase();
+    const buf = state.editBuffer.sanpham;
+    const rows = [{id:"kho", name:"Trong kho"}, ...state.partners].filter(p => !q || p.name.toLowerCase().includes(q));
+    box.innerHTML = rows.map(p=>{
+      let hint = "";
+      if(p.id!=="kho"){
+        const lp = buf.id ? lastPartnerPrice(p.id, buf.id) : null;
+        hint = lp ? `${fmtVND(lp.price)} · ${lp.quotedAt}` : "Chưa từng nhập";
+      }
+      const selected = buf.supplierId===p.id;
+      return `
+      <div class="partner-pick-row ${selected?'selected':''}" data-action="pick-supplier" data-id="${p.id}">
+        <div class="truck">${ICON.truck}</div>
+        <div>
+          <div class="ppr-name">${esc(p.name)}</div>
+          ${hint ? `<div class="ppr-sub">${esc(hint)}</div>` : ""}
+        </div>
+      </div>`;
+    }).join("");
+  }
+
+  function onAppClick(e){
+    const el = e.target.closest("[data-action]");
+    if(!el) return;
+    const action = el.dataset.action;
+
+    if(action==="pin"){ pinOnly(el.dataset.type); return; }
+    if(action==="open-search"){
+      state.overlay = {open:true, type:el.dataset.type, query:"", mode:"switch", contextLabel:""};
+      render();
+      return;
+    }
+    if(action==="add-line-search"){
+      const buf = state.editBuffer[state.pinned];
+      const label = (buf.name && buf.name.trim()) ? buf.name.trim() : (state.pinned==="khach" ? "khách hàng mới" : "đối tác mới");
+      state.overlay = {open:true, type:"sanpham", query:"", mode:"addLine", contextLabel:label};
+      render();
+      return;
+    }
+    if(action==="close-search"){ state.overlay = {open:false, type:null, query:"", mode:"switch", contextLabel:""}; render(); return; }
+    if(action==="new-entity"){ newEntity(el.dataset.type); return; }
+    if(action==="pick-overlay"){
+      const type = state.overlay.type;
+      const mode = state.overlay.mode;
+      const id = el.dataset.id;
+      state.overlay = {open:false, type:null, query:"", mode:"switch", contextLabel:""};
+      if(mode==="addLine") addProductToActiveOrder(id);
+      else pinAndLoad(type, id);
+      return;
+    }
+    if(action==="pick-supplier"){
+      const buf = state.editBuffer.sanpham;
+      buf.supplierId = el.dataset.id;
+      if(buf.supplierId!=="kho"){
+        const lp = buf.id ? lastPartnerPrice(buf.supplierId, buf.id) : null;
+        buf.supplierPrice = lp ? lp.price : buf.import_price;
+        if(!buf.supplierQty) buf.supplierQty = 1;
+      } else { buf.supplierQty = 0; }
+      render();
+      return;
+    }
+    if(action==="set-ctype"){
+      const buf = state.editBuffer.khach;
+      if(buf.customer_type!==el.dataset.val){
+        buf.customer_type = el.dataset.val;
+        recalcCustomerTypePrices();
+        toast("Đã cập nhật giá theo loại khách " + (el.dataset.val==="si"?"sỉ":"lẻ"));
+      }
+      render();
+      return;
+    }
+    if(action==="qty-stock"){
+      const buf = state.editBuffer.sanpham;
+      buf.stock_qty = (Number(buf.stock_qty)||0) + Number(el.dataset.delta);
+      render();
+      return;
+    }
+    if(action==="qty-supplier"){
+      const buf = state.editBuffer.sanpham;
+      buf.supplierQty = Math.max(0, (Number(buf.supplierQty)||0) + Number(el.dataset.delta));
+      render();
+      return;
+    }
+    if(action==="line-qty"){
+      changeLineQty(Number(el.dataset.idx), Number(el.dataset.delta));
+      return;
+    }
+    if(action==="del-line"){
+      deleteLine(Number(el.dataset.idx));
+      return;
+    }
+    if(action==="open-fb"){ toast("Demo: sẽ mở trang Facebook cá nhân trong bản thật"); return; }
+    if(action==="logout"){ toast("Demo: đăng xuất (không có xác thực thật trong demo này)"); return; }
+    if(action==="huy"){ doHuy(); return; }
+    if(action==="chot"){ doChot(); return; }
+    if(action==="confirm-no"){ state.confirm = null; render(); return; }
+    if(action==="confirm-yes"){ const fn = state.confirm.onYes; state.confirm = null; fn(); return; }
+
+    if(action==="nav-goto"){
+      const page = el.dataset.page;
+      if(page==="baocao"){ toast('Màn "Báo cáo" chưa có mô tả luồng — chưa triển khai trong demo này'); return; }
+      state.page = page;
+      render();
+      return;
+    }
+    if(action==="nav-back"){ state.page = "main"; render(); return; }
+
+    // ---- Kho hàng ----
+    if(action==="kho-apply"){ applyKhoUpdate(); return; }
+
+    // ---- Đơn bán ----
+    if(action==="donban-toggle"){
+      state.donbanExpanded = state.donbanExpanded===el.dataset.id ? null : el.dataset.id;
+      render();
+      return;
+    }
+    if(action==="donban-cancel"){
+      const o = state.salesOrders.find(x=>x.id===el.dataset.id);
+      openConfirm(`Hủy đơn bán của "${findCustomer(o.customerId).name}"? Không thể hoàn tác.`, ()=>{
+        cancelOrder(o); toast("Đã hủy đơn bán"); render();
+      });
+      return;
+    }
+    if(action==="donban-close"){
+      const o = state.salesOrders.find(x=>x.id===el.dataset.id);
+      const total = closeSalesOrder(o);
+      toast(`Đã chốt đơn — trừ kho, cộng nợ ${fmtVND(total)} cho ${findCustomer(o.customerId).name}`);
+      render();
+      return;
+    }
+    if(action==="donban-copy"){
+      const o = state.salesOrders.find(x=>x.id===el.dataset.id);
+      const text = buildBillText(o);
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(text).then(()=>toast("Đã copy nội dung bill")).catch(()=>toast("Không copy được trên trình duyệt này"));
+      } else toast("Không copy được trên trình duyệt này");
+      return;
+    }
+    if(action==="donban-zalo"){ toast("Demo: sẽ mở Zalo/Facebook để gửi bill trong bản thật"); return; }
+
+    // ---- Đơn nhập ----
+    if(action==="donnhap-toggle"){
+      state.donnhapExpanded = state.donnhapExpanded===el.dataset.id ? null : el.dataset.id;
+      render();
+      return;
+    }
+    if(action==="donnhap-cancel"){
+      const o = state.purchaseOrders.find(x=>x.id===el.dataset.id);
+      openConfirm(`Hủy đơn nhập của "${findPartner(o.partnerId).name}"? Không thể hoàn tác.`, ()=>{
+        cancelOrder(o); toast("Đã hủy đơn nhập"); render();
+      });
+      return;
+    }
+    if(action==="donnhap-close"){
+      const o = state.purchaseOrders.find(x=>x.id===el.dataset.id);
+      const total = closePurchaseOrder(o);
+      toast(`Đã chốt đơn — cộng kho, cộng nợ ${fmtVND(total)} cho ${findPartner(o.partnerId).name}`);
+      render();
+      return;
+    }
+
+    // ---- Công nợ ----
+    if(action==="debt-tab"){
+      state.debtTab = el.dataset.val;
+      state.debtOpenId = null;
+      render();
+      return;
+    }
+    if(action==="debt-toggle"){
+      state.debtOpenId = state.debtOpenId===el.dataset.id ? null : el.dataset.id;
+      render();
+      return;
+    }
+    if(action==="debt-save"){ debtSave(el.dataset.id); return; }
+  }
+
+  /* ---------- Kho hàng: áp dụng thay đổi ---------- */
+  function applyKhoUpdate(){
+    const pendingMap = getPendingKhoQtyMap();
+    for(const [pid, edit] of Object.entries(state.khoEdits)){
+      if(edit.stock_qty!=null){
+        const reserved = pendingMap[pid]||0;
+        if(edit.stock_qty < reserved){
+          toast(`"${findProduct(pid).name}": không thể để tồn kho dưới ${reserved} (đang giữ chỗ cho đơn chưa chốt)`);
+          return;
+        }
+      }
+    }
+    Object.entries(state.khoEdits).forEach(([pid,edit])=>{
+      const p = findProduct(pid);
+      if(edit.import_price!=null) p.import_price = edit.import_price;
+      if(edit.stock_qty!=null) p.stock_qty = edit.stock_qty;
+    });
+    state.khoEdits = {};
+    toast("Đã cập nhật kho hàng");
+    render();
+  }
+
+  /* ---------- Công nợ: lưu điều chỉnh hoặc thanh toán (mục 5.9 / 6.6) ---------- */
+  function debtSave(id){
+    const type = state.debtTab;
+    const entity = type==="khach" ? findCustomer(id) : findPartner(id);
+    const paymentInput = document.querySelector(`[data-debt-payment="${id}"]`);
+    const dateInput = document.querySelector(`[data-debt-date="${id}"]`);
+    const adjustInput = document.querySelector(`[data-debt-adjust="${id}"]`);
+    const paymentVal = Number(paymentInput.value)||0;
+
+    if(paymentVal>0){
+      if(!dateInput.value){ toast("Vui lòng chọn ngày thanh toán"); return; }
+      const doPay = ()=>{
+        const prev = entity.debt||0;
+        entity.debt = Math.max(0, prev - paymentVal);
+        state.debtOpenId = null;
+        toast(`Đã ghi nhận thanh toán ${fmtVND(paymentVal)} từ ${entity.name}`, ()=>{ entity.debt = prev; render(); });
+        render();
+      };
+      if(paymentVal>DEBT_CONFIRM_THRESHOLD) openConfirm(`Xác nhận thanh toán ${fmtVND(paymentVal)}?`, doPay); else doPay();
+      return;
+    }
+    const newDebt = Number(adjustInput.value)||0;
+    const diff = Math.abs(newDebt - (entity.debt||0));
+    const doAdjust = ()=>{
+      const prev = entity.debt||0;
+      entity.debt = newDebt;
+      state.debtOpenId = null;
+      toast(`Đã điều chỉnh nợ ${entity.name} còn ${fmtVND(newDebt)}`, ()=>{ entity.debt = prev; render(); });
+      render();
+    };
+    if(diff>DEBT_CONFIRM_THRESHOLD) openConfirm(`Chênh lệch ${fmtVND(diff)} so với hiện tại. Xác nhận điều chỉnh?`, doAdjust); else doAdjust();
+  }
+
+  function getDraftLines(){ return state.editBuffer[state.pinned].lines; }
+  function changeLineQty(idx, delta){
+    const lines = getDraftLines();
+    lines[idx].qty = Math.max(1, lines[idx].qty + delta);
+    render();
+  }
+  function deleteLine(idx){
+    const lines = getDraftLines();
+    lines.splice(idx,1);
+    render();
+  }
+
+  function onAppInput(e){
+    const t = e.target;
+    if(t.id==="overlaySearchInput" || t.id==="supplierLocalSearch") return; // đã xử lý riêng
+
+    // Các nhánh sửa field theo t.dataset.field CHỈ áp dụng ở màn chính (state.page==="main") —
+    // Kho hàng cũng dùng data-field="stock_qty"/"import_price" cho input của nó (data-action=
+    // "kho-field" mới là điểm phân biệt), nếu thiếu điều kiện page sẽ bị nhánh khách/sản phẩm
+    // "nuốt" mất trước khi tới nhánh kho-field bên dưới.
+    if(state.page==="main" && t.dataset.field && state.pinned==="sanpham"){
+      state.editBuffer.sanpham[t.dataset.field] = t.value;
+      return;
+    }
+    if(state.page==="main" && t.dataset.field && state.pinned==="khach"){
+      state.editBuffer.khach[t.dataset.field] = t.value;
+      return;
+    }
+    if(state.page==="main" && t.dataset.field && state.pinned==="doitac"){
+      const f = t.dataset.field;
+      const buf = state.editBuffer.doitac;
+      if(f==="contact0name") buf.contacts[0].name = t.value;
+      else if(f==="contact0phone") buf.contacts[0].phone = t.value;
+      else if(f==="contact1name") buf.contacts[1].name = t.value;
+      else if(f==="contact1phone") buf.contacts[1].phone = t.value;
+      else buf[f] = t.value;
+      return;
+    }
+    if(t.dataset.action==="line-qty-input"){
+      const lines = getDraftLines();
+      const v = Math.max(1, Number(t.value)||1);
+      lines[Number(t.dataset.idx)].qty = v;
+      const totalEl = t.closest(".order-line").querySelector(".ol-total");
+      const priceInput = t.closest(".order-line").querySelector(".ol-price input");
+      totalEl.textContent = fmtVND(v * Number(priceInput.value));
+      return;
+    }
+    if(t.dataset.action==="line-price"){
+      const lines = getDraftLines();
+      const idx = Number(t.dataset.idx);
+      const field = t.dataset.kind==="so" ? "sellPrice" : "importPrice";
+      lines[idx][field] = Number(t.value)||0;
+      const totalEl = t.closest(".order-line").querySelector(".ol-total");
+      const qtyInput = t.closest(".order-line").querySelector('[data-action="line-qty-input"]');
+      totalEl.textContent = fmtVND(Number(qtyInput.value) * Number(t.value));
+      return;
+    }
+    if(t.dataset.action==="kho-field"){
+      const pid = t.dataset.id;
+      const field = t.dataset.field;
+      if(!state.khoEdits[pid]) state.khoEdits[pid] = {};
+      state.khoEdits[pid][field] = Number(t.value)||0;
+      const row = t.closest(".kho-row");
+      const importInput = row.querySelector('[data-field="import_price"]');
+      const stockInput = row.querySelector('[data-field="stock_qty"]');
+      const stockQty = Number(stockInput.value)||0;
+      const importPrice = Number(importInput.value)||0;
+      row.querySelector(`[data-kho-total="${pid}"]`).textContent = `Thành tiền: ${fmtVND(stockQty>0 ? stockQty*importPrice : 0)}`;
+      const totalEl = $("#khoTotalValue");
+      if(totalEl) totalEl.textContent = fmtVND(khoTotal());
+      const applyBtn = document.querySelector('[data-action="kho-apply"]');
+      if(applyBtn) applyBtn.disabled = false;
+      return;
+    }
+  }
+
+  /* ============================== INIT ============================== */
+  // Mặc định ghim khối Khách hàng nhưng KHÔNG tự chọn ai — hiện trạng thái khoá, đúng yêu cầu
+  // "chưa có đối tượng nào được chọn thì chạm vào khối con sẽ mở popup tìm kiếm".
+  render();
+})();
+</script>
+</body>
+</html>
