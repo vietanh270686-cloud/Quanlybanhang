@@ -17,11 +17,15 @@ let appStarted = false;
 initAuth(session=>{
   if(session){
     hideLoginView();
+    // onAuthStateChange bắn lại sự kiện (vd TOKEN_REFRESHED) mỗi khi quay lại app sau khi
+    // chuyển sang app khác trên điện thoại — CHỈ render lại màn chính ở lần đăng nhập đầu
+    // tiên, nếu không mainScreen.js sẽ bị vẽ lại từ đầu (mất tab/khách hàng đang xử lý dở,
+    // kẹt ở "Đang tải" vì không có gì gọi lại việc tải dữ liệu thật).
     if(!appStarted){
       appStarted = true;
       startAppEvents();
+      renderMainScreen();
     }
-    renderMainScreen();
   } else {
     appStarted = false;
     renderLoginView();
