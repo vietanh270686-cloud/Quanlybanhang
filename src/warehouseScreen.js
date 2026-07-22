@@ -64,20 +64,20 @@ function screenHtml(){
   return `
     <div class="modal-handle"></div>
     <div class="modal-head"><div class="modal-title">Kho hàng</div><div class="icon-btn" data-action="close-modal">${ICON.close}</div></div>
-    <div class="modal-body">
-      <div class="card" style="margin-bottom:12px;">
+    <div class="modal-body" style="padding-left:0; padding-right:0; display:flex; flex-direction:column;">
+      <div class="p1-card">
         <div class="search-box">${ICON.search}<input id="kho-search" placeholder="Gõ tên sản phẩm để tìm…" value="${esc(query)}" autocomplete="off"></div>
-        <div class="field-note">Mặc định hiện sản phẩm còn tồn hoặc đang âm (cần mua bù, luôn hiện đầu danh sách) — gõ tìm kiếm để thấy cả sản phẩm hết hàng (0) và cập nhật lại.</div>
+        <div class="field-note" style="margin-top:8px;">Mặc định hiện sản phẩm còn tồn hoặc đang âm (cần mua bù, luôn hiện đầu danh sách) — gõ tìm kiếm để thấy cả sản phẩm hết hàng (0) và cập nhật lại.</div>
+        <div class="order-total-bar" style="margin-top:10px;">
+          <div class="order-total-label">Tổng tiền hàng tồn kho</div>
+          <div class="order-total-value" id="kho-total">${fmtVND(grandTotal())}</div>
+        </div>
       </div>
-      <div id="kho-list">${listHtml()}</div>
-      <div class="order-total-bar">
-        <div class="order-total-label">Tổng tiền hàng tồn kho</div>
-        <div class="order-total-value" id="kho-total">${fmtVND(grandTotal())}</div>
-      </div>
+      <div class="list-wrap"><div id="kho-list">${listHtml()}</div></div>
     </div>
     <div class="modal-foot">
-      <button class="btn btn-ghost" data-action="close-modal">Đóng</button>
-      <button class="btn btn-primary btn-block" data-action="kho-update" ${hasChanges()?'':'disabled'}>${ICON.check} Cập nhật</button>
+      <button class="btn btn-sm btn-ghost" data-action="close-modal">Đóng</button>
+      <button class="btn btn-sm btn-primary btn-block" data-action="kho-update" ${hasChanges()?'':'disabled'}>${ICON.check} Cập nhật</button>
     </div>
   `;
 }

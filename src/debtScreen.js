@@ -79,7 +79,7 @@ function screenHtml(){
         <div class="debt-tab-btn ${debtTab==='partner'?'active':''}" data-action="set-debt-tab" data-tab="partner">Công nợ Đối tác</div>
       </div>
 
-      <div class="card" style="margin:0 16px 12px;">
+      <div class="p1-card">
         <div class="search-box">${ICON.search}<input id="debt-search" placeholder="Tìm toàn bộ ${label}…" value="${esc(debtQuery)}" autocomplete="off"></div>
       </div>
 
@@ -131,8 +131,8 @@ function screenHtml(){
     </div>
     ${!entitiesLoading && !entitiesError && selected ? `
     <div class="modal-foot">
-      <button class="btn btn-ghost" data-action="close-modal">Đóng</button>
-      <button class="btn btn-primary btn-block" data-action="save-debt" data-id="${selected.id}">${ICON.check} Lưu</button>
+      <button class="btn btn-sm btn-ghost" data-action="close-modal">Đóng</button>
+      <button class="btn btn-sm btn-primary btn-block" data-action="save-debt" data-id="${selected.id}">${ICON.check} Lưu</button>
     </div>` : ''}
   `;
 }

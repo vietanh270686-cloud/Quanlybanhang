@@ -64,25 +64,29 @@ function screenHtml(loading){
       </div>
       <div style="font-size:12px; color:var(--ink-faint); font-weight:600;">${loading?'':count+' đơn'}</div>
     </div>
-    <div class="modal-body" style="padding-left:0; padding-right:0;">
-      <div style="padding:0 16px;">
-        <div class="card" style="margin-bottom:12px;">
+    <div class="modal-body" style="padding-left:0; padding-right:0; display:flex; flex-direction:column;">
+      <div class="p1-card">
+        <div class="p1-row">
           <div class="field">
             <div class="field-label">Ngày</div>
             <input class="input" type="date" id="po-date" value="${selectedDate}">
           </div>
+        </div>
+        <div class="p1-row">
           <div class="field">
             <div class="field-label">Tìm đối tác trong ngày</div>
             <div class="search-box">${ICON.search}<input id="po-partner-search" placeholder="Gõ tên đối tác…" value="${esc(partnerQuery)}" autocomplete="off"></div>
           </div>
-          <div class="field" style="margin-bottom:0;">
-            <div class="field-label">Tổng tiền mua từ đối tác</div>
-            <div class="readonly-field" style="font-weight:800; font-family:'Sora';">${loading?'…':fmtVND(dayTotal())}</div>
+        </div>
+        <div class="p1-stats">
+          <div class="stat-box">
+            <div class="stat-label">Tổng tiền mua từ đối tác</div>
+            <div class="stat-value">${loading?'…':fmtVND(dayTotal())}</div>
           </div>
         </div>
       </div>
-      <div id="po-list">
-        ${loading ? `<div style="padding:0 16px;">${loadingSkeleton(3)}</div>`
+      <div class="list-wrap" id="po-list">
+        ${loading ? loadingSkeleton(3)
           : screenError ? errorBanner('Không tải được danh sách đơn mua — kiểm tra lại kết nối mạng.', { retryAction:'retry-purchase-screen' })
           : filtered.length ? filtered.map(o=>renderPOCard(o)).join('')
           : emptyState('Không có đơn mua nào', partnerQuery.trim() ? 'Không tìm thấy đối tác phù hợp trong ngày này.' : 'Tạo đơn bằng cách chạm vào một đối tác ở màn hình chính.')}
