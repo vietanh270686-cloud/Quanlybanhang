@@ -6,6 +6,8 @@ import {
   listSalesOrdersByDate, getSalesOrder, cancelSalesOrder, closeSalesOrder,
   orderTotal, orderLineProfit, orderProfit,
 } from './api/salesOrders.js';
+import { getCustomer } from './api/customers.js';
+import { recordPayment } from './api/debt.js';
 
 let screenWrap = null;
 let selectedDate = todayStr();
@@ -136,6 +138,7 @@ function renderSOCard(o){
       ${o.status==='moi' ? `
       <div class="order-actions">
         <button class="btn btn-danger-ghost btn-sm" data-action="cancel-so-list" data-id="${o.id}" data-name="${esc(custName)}">${ICON.x} Hủy</button>
+        <button class="btn btn-primary btn-sm" data-action="pay-so-list" data-id="${o.id}" data-customerid="${o.customer_id}" data-name="${esc(custName)}" data-total="${total}">${ICON.check} Thanh toán</button>
         <button class="btn btn-kho btn-sm" data-action="close-so-list" data-id="${o.id}">${ICON.check} Chốt</button>
       </div>` : ''}
     </div>
@@ -284,11 +287,30 @@ function confirmCancelSOFromList(id, name){
   });
 }
 
+// Chốt đơn + ghi nhận luôn thanh toán đúng bằng giá trị đơn cho khách hàng đó (khách trả tiền
+// ngay khi mua) — dùng lại đúng RPC close_sales_order (cộng nợ) rồi recordPayment (trừ lại nợ
+// vừa cộng), nên công nợ khách không đổi ròng nhưng lịch sử vẫn ghi đủ cả 2 giao dịch.
+function confirmPaySOFromList(id, customerId, name, total){
+  openConfirmModal('Xác nhận thanh toán?', `Bạn có đồng ý thực hiện thanh toán ${fmtVND(total)} và chốt đơn của "${esc(name||'khách này')}" không?`, ()=>commitPaySOFromList(id, customerId, total));
+}
+async function commitPaySOFromList(id, customerId, total){
+  try{
+    await closeSalesOrder(id);
+    const fresh = await getCustomer(customerId);
+    await recordPayment('customer', customerId, total, todayStr(), fresh.debt||0);
+    await loadOrdersForDate();
+    showToast('Đã chốt đơn và ghi nhận thanh toán.', []);
+  } catch(err){
+    showToast('Không thực hiện được — kiểm tra lại kết nối mạng.', []);
+  }
+}
+
 export function handleSalesScreenAction(action, el){
   switch(action){
     case 'view-so-detail': viewSODetail(el.dataset.id); return true;
     case 'close-so-list': closeSOFromList(el.dataset.id); return true;
     case 'cancel-so-list': confirmCancelSOFromList(el.dataset.id, el.dataset.name); return true;
+    case 'pay-so-list': confirmPaySOFromList(el.dataset.id, el.dataset.customerid, el.dataset.name, parseFloat(el.dataset.total)||0); return true;
     case 'retry-sales-screen': loadOrdersForDate(); return true;
     case 'send-bill': sendBill(el.dataset.id, el.dataset.channel); return true;
     case 'copy-bill': copyBillText(el.dataset.id); return true;

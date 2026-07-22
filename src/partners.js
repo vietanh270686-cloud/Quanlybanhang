@@ -1,8 +1,7 @@
 import { ICON } from './icons.js';
 import { esc, fmtVND, timeAgo, facebookProfileUrl } from './utils.js';
-import { openModal, rerenderTopModal, requestCloseTopModal, openConfirmModal, loadingSkeleton, errorBanner } from './modal.js';
+import { openConfirmModal, loadingSkeleton } from './modal.js';
 import { showToast } from './toast.js';
-import { resetSearchAndRefresh } from './home.js';
 import { getPartner, createPartner, updatePartner, upsertPartnerContact } from './api/partners.js';
 import { findByExactName } from './supabaseClient.js';
 import {
@@ -11,7 +10,10 @@ import {
 } from './api/purchaseOrders.js';
 import { searchProductsByName, getPartnerPrice, getProductHistoryForPartner } from './api/products.js';
 import { notifyPurchaseOrdersChanged } from './purchaseOrdersScreen.js';
+import { paintEntityView, openQuickAddProductPopup, refreshMainCounts } from './mainScreen.js';
 
+// LƯU Ý DI TRÚ: xem ghi chú tương tự ở đầu products.js — "Đối tác" giờ là 1 tab cố định của
+// mainScreen.js, vẽ qua paintEntityView() thay vì tự mở modal. Toàn bộ logic nghiệp vụ giữ nguyên.
 let partnerId = null;
 let isNewPartner = false;
 let partnerDraft = null;      // {name, seller1:{name,phone}, seller2:{name,phone}, address, errors}
@@ -24,17 +26,22 @@ let quickAddProducts = [];
 let productHistoryIds = [];    // id sản phẩm đối tác này đã từng bán, gần nhất trước
 let demandMap = {};             // { productId: {productId, productName, qty} } — chỉ có ở đối tác cũ
 let modalLoadError = null;
+// Khối nào đang mở rộng — mặc định mở khối sản phẩm đang mua, khối thông tin đối tác thu gọn
+// còn 1 dòng tên (accordion — chỉ 1 khối mở rộng tại 1 thời điểm).
+let expandedCard = 'products'; // 'info' | 'products'
 
 export async function openPartnerModal(idOrNull){
+  if(idOrNull !== partnerId) expandedCard = 'products';
   isNewPartner = !idOrNull;
   partnerId = idOrNull;
   modalLoadError = null;
+  partnerDraft = null;
   poRecord = null; poLines = []; localDraftLines = []; localLineSeq = 0;
   quickAddQuery = ''; demandMap = {}; productHistoryIds = [];
 
   // Đối tác mới chỉ được tạo khi bấm nút "Tạo mới" — đóng popup theo cách khác
   // (backdrop, nút X, Hủy đơn) sẽ bỏ dở hoàn toàn, không tự lưu.
-  openModal(loadingModalHtml(isNewPartner ? 'Đối tác mới' : 'Đối tác'));
+  paint();
 
   try{
     quickAddProducts = await searchProductsByName('');
@@ -101,28 +108,32 @@ async function commitNewPartner(typedName){
       }
       notifyPurchaseOrdersChanged();
     }
-    requestCloseTopModal();
-    resetSearchAndRefresh();
+    openPartnerModal(newPartner.id);
+    refreshMainCounts();
     showToast(`Đã tạo đối tác "${typedName}".`, [], { icon:ICON.check });
   } catch(err){
     showToast(`Không lưu được đối tác "${typedName}" — kiểm tra lại kết nối mạng.`, []);
   }
 }
 
-function loadingModalHtml(title){
-  return `
-    <div class="modal-handle"></div>
-    <div class="modal-head">
-      <div class="modal-title">${esc(title)}</div>
-      <div class="icon-btn" data-action="close-modal">${ICON.close}</div>
-    </div>
-    <div class="modal-body"><div class="card">${loadingSkeleton(5)}</div></div>
-  `;
-}
-
 function paint(){
-  rerenderTopModal(partnerModalHtml());
-  wireInputs();
+  if(modalLoadError){
+    paintEntityView('doitac', { error:true, retryAction:'retry-partner-modal' });
+    return;
+  }
+  if(!partnerDraft){
+    paintEntityView('doitac', { loading:true });
+    return;
+  }
+  const isNewUnsaved = isNewPartner;
+  paintEntityView('doitac', {
+    id: isNewUnsaved ? null : partnerId,
+    name: isNewUnsaved ? 'Đối tác mới' : (partnerDraft.name || '(chưa đặt tên)'),
+    sub: isNewUnsaved ? 'Chưa lưu' : 'Đối tác cung cấp',
+    bodyHtml: partnerDetailCardsHtml(),
+    footerHtml: partnerFooterHtml(),
+    wire: wireInputs,
+  });
 }
 
 function displayLines(){
@@ -135,77 +146,109 @@ function currentTotal(){
   return displayLines().reduce((s,l)=> s + l.qty*l.importPrice, 0);
 }
 
-function partnerModalHtml(){
-  if(modalLoadError){
-    return `
-      <div class="modal-handle"></div>
-      <div class="modal-head"><div class="modal-title">Đối tác</div><div class="icon-btn" data-action="close-modal">${ICON.close}</div></div>
-      <div class="modal-body">${errorBanner('Không tải được dữ liệu đối tác — kiểm tra lại kết nối mạng.', { retryAction:'retry-partner-modal' })}</div>
-    `;
-  }
-  if(!partnerDraft) return loadingModalHtml('Đối tác');
+function partnerDetailCardsHtml(){
+  const infoOpen = expandedCard === 'info';
+  return `
+    <div class="detail-card ${infoOpen?'':'collapsed'}">
+      ${infoOpen ? infoCardOpenHtml() : infoCardCollapsedHtml()}
+    </div>
+    <div class="detail-card ${infoOpen?'collapsed':''}">
+      ${infoOpen ? productsCardCollapsedHtml() : productsCardOpenHtml()}
+    </div>
+  `;
+}
 
+function infoCardCollapsedHtml(){
+  const d = partnerDraft;
+  return `
+    <div class="detail-card-head accordion-head" data-action="partner-expand-card" data-card="info">
+      <div class="detail-card-head-row">
+        <div class="eh-info">
+          <div class="field-label" style="margin-bottom:2px;">Tên đối tác</div>
+          <div class="accordion-collapsed-value">${esc(d.name||'(chưa đặt tên)')}</div>
+        </div>
+        ${ICON.chevRight}
+      </div>
+    </div>
+  `;
+}
+
+function infoCardOpenHtml(){
   const d = partnerDraft;
   const errors = d.errors || {};
-  const lines = displayLines();
-  const total = currentTotal();
-  const isNewUnsaved = isNewPartner;
-  const canCall = !isNewUnsaved;
-  const demandEntries = Object.values(demandMap).filter(e=>e.qty>0);
-
+  const canCall = !isNewPartner;
   return `
-    <div class="modal-handle"></div>
-    <div class="modal-head">
-      <div class="modal-title">${isNewUnsaved ? 'Đối tác mới' : esc(d.name||'Đối tác')}</div>
-      <div class="icon-btn" data-action="close-modal">${ICON.close}</div>
-    </div>
-    <div class="modal-body">
+    <div class="detail-card-body">
       ${errors.any ? `<div class="form-warning">${ICON.warn} Cần nhập Tên đối tác.</div>` : ''}
-      <div class="card">
-        <div class="field">
-          <div class="field-label">Tên đối tác</div>
-          <input class="input ${errors.name?'error':''}" id="ptf-name" value="${esc(d.name)}" placeholder="VD: Công ty TNHH ABC">
-          ${errors.name?`<div class="field-error">${ICON.warn} Chưa nhập tên đối tác</div>`:''}
-        </div>
-
-        <div class="field-label" style="margin-top:2px;">Người bán 1 <span style="text-transform:none; font-weight:500; color:var(--ink-faint);">(không bắt buộc)</span></div>
-        <div class="field-row">
-          <div class="field"><input class="input" id="ptf-s1-name" value="${esc(d.seller1.name)}" placeholder="Tên người bán"></div>
-          <div class="field"><input class="input" id="ptf-s1-phone" value="${esc(d.seller1.phone)}" placeholder="SĐT"></div>
-          ${canCall && d.seller1.phone ? `
-          <div style="display:flex; align-items:center; gap:8px;">
-            <a class="round-btn call" href="tel:${d.seller1.phone}">${ICON.phone}</a>
-            <a class="round-btn zalo" href="https://zalo.me/${d.seller1.phone}" target="_blank" rel="noopener">Z</a>
-          </div>` : ''}
-        </div>
-
-        <div class="field-label">Người bán 2 <span style="text-transform:none; font-weight:500; color:var(--ink-faint);">(không bắt buộc)</span></div>
-        <div class="field-row">
-          <div class="field"><input class="input" id="ptf-s2-name" value="${esc(d.seller2.name)}" placeholder="Tên người bán"></div>
-          <div class="field"><input class="input" id="ptf-s2-phone" value="${esc(d.seller2.phone)}" placeholder="SĐT"></div>
-          ${canCall && d.seller2.phone ? `
-          <div style="display:flex; align-items:center; gap:8px;">
-            <a class="round-btn call" href="tel:${d.seller2.phone}">${ICON.phone}</a>
-          </div>` : ''}
-        </div>
-
-        <div class="field">
-          <div class="field-label">Địa chỉ</div>
-          <input class="input" id="ptf-address" value="${esc(d.address)}" placeholder="Không bắt buộc">
-        </div>
-        <div class="field-row">
-          <div class="field">
-            <div class="field-label">ID / link Facebook</div>
-            <input class="input" id="ptf-facebook" value="${esc(d.facebookId)}" placeholder="VD: nguyen.van.a hoặc 100012345678 (không bắt buộc)">
-            <div class="field-note">Dùng để mở Messenger gửi bill từ màn Đơn bán.</div>
-          </div>
-          ${canCall && d.facebookId ? `
-          <div style="display:flex; align-items:flex-end; padding-bottom:1px;">
-            <a class="round-btn facebook" href="${facebookProfileUrl(d.facebookId)}" target="_blank" rel="noopener">${ICON.facebook}</a>
-          </div>` : ''}
-        </div>
+      <div class="field">
+        <div class="field-label">Tên đối tác</div>
+        <input class="input ${errors.name?'error':''}" id="ptf-name" value="${esc(d.name)}" placeholder="VD: Công ty TNHH ABC">
+        ${errors.name?`<div class="field-error">${ICON.warn} Chưa nhập tên đối tác</div>`:''}
       </div>
 
+      <div class="field-label" style="margin-top:2px;">Người bán 1 <span style="text-transform:none; font-weight:500; color:var(--ink-faint);">(không bắt buộc)</span></div>
+      <div class="field-row">
+        <div class="field"><input class="input" id="ptf-s1-name" value="${esc(d.seller1.name)}" placeholder="Tên người bán"></div>
+        <div class="field"><input class="input" id="ptf-s1-phone" value="${esc(d.seller1.phone)}" placeholder="SĐT"></div>
+        ${canCall && d.seller1.phone ? `
+        <div style="display:flex; align-items:center; gap:8px;">
+          <a class="round-btn call" href="tel:${d.seller1.phone}">${ICON.phone}</a>
+          <a class="round-btn zalo" href="https://zalo.me/${d.seller1.phone}" target="_blank" rel="noopener">Z</a>
+        </div>` : ''}
+      </div>
+
+      <div class="field-label">Người bán 2 <span style="text-transform:none; font-weight:500; color:var(--ink-faint);">(không bắt buộc)</span></div>
+      <div class="field-row">
+        <div class="field"><input class="input" id="ptf-s2-name" value="${esc(d.seller2.name)}" placeholder="Tên người bán"></div>
+        <div class="field"><input class="input" id="ptf-s2-phone" value="${esc(d.seller2.phone)}" placeholder="SĐT"></div>
+        ${canCall && d.seller2.phone ? `
+        <div style="display:flex; align-items:center; gap:8px;">
+          <a class="round-btn call" href="tel:${d.seller2.phone}">${ICON.phone}</a>
+        </div>` : ''}
+      </div>
+
+      <div class="field">
+        <div class="field-label">Địa chỉ</div>
+        <input class="input" id="ptf-address" value="${esc(d.address)}" placeholder="Không bắt buộc">
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <div class="field-label">ID / link Facebook</div>
+          <input class="input" id="ptf-facebook" value="${esc(d.facebookId)}" placeholder="VD: nguyen.van.a hoặc 100012345678 (không bắt buộc)">
+          <div class="field-note">Dùng để mở Messenger gửi bill từ màn Đơn bán.</div>
+        </div>
+        ${canCall && d.facebookId ? `
+        <div style="display:flex; align-items:flex-end; padding-bottom:1px;">
+          <a class="round-btn facebook" href="${facebookProfileUrl(d.facebookId)}" target="_blank" rel="noopener">${ICON.facebook}</a>
+        </div>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+function productsCardCollapsedHtml(){
+  const count = displayLines().length;
+  return `
+    <div class="detail-card-head accordion-head" data-action="partner-expand-card" data-card="products">
+      <div class="detail-card-head-row">
+        <div class="search-box" style="pointer-events:none;">${ICON.search}<span class="accordion-collapsed-value" style="color:var(--ink-faint); font-weight:400;">Tìm sản phẩm… (${count} đang mua)</span></div>
+      </div>
+    </div>
+  `;
+}
+
+function productsCardOpenHtml(){
+  const lines = displayLines();
+  const total = currentTotal();
+  const demandEntries = Object.values(demandMap).filter(e=>e.qty>0);
+  return `
+    <div class="detail-card-head">
+      <div class="search-box">
+        ${ICON.search}
+        <input id="qa-search-p" placeholder="Tìm sản phẩm…" value="${esc(quickAddQuery)}" autocomplete="off">
+      </div>
+    </div>
+    <div class="detail-card-body">
       ${demandEntries.length ? `
       <div class="demand-banner">
         <div class="demand-head">${ICON.lightning} Gợi ý cần nhập (cộng dồn từ đơn bán đang chờ)</div>
@@ -213,35 +256,28 @@ function partnerModalHtml(){
         <button class="btn btn-kho btn-sm demand-apply btn-block" data-action="apply-demand">${ICON.check} Thêm tất cả vào đơn mua</button>
       </div>` : ''}
 
-      <div class="card">
-        <div class="field-label" style="margin-bottom:9px;">Sản phẩm đang mua (${lines.length})</div>
-        <div id="po-lines">${renderPOLines(lines)}</div>
-        ${!lines.length?`<div class="field-note">Chưa có sản phẩm — tìm và thêm ở dưới, hoặc dùng gợi ý phía trên.</div>`:''}
-        <div class="order-total-bar">
-          <div class="order-total-label">Tổng tiền đơn</div>
-          <div class="order-total-value">${fmtVND(total)}</div>
-        </div>
+      <div class="field-label" style="margin-bottom:9px;">Sản phẩm đang mua (${lines.length})</div>
+      <div id="po-lines">${renderPOLines(lines)}</div>
+      ${!lines.length?`<div class="field-note">Chưa có sản phẩm — tìm và thêm ở dưới, hoặc dùng gợi ý phía trên.</div>`:''}
+      <div class="order-total-bar">
+        <div class="order-total-label">Tổng tiền đơn</div>
+        <div class="order-total-value">${fmtVND(total)}</div>
       </div>
 
-      <div class="card" style="margin-bottom:12px;">
-        <div class="search-box">
-          ${ICON.search}
-          <input id="qa-search-p" placeholder="Tìm sản phẩm…" value="${esc(quickAddQuery)}" autocomplete="off">
-        </div>
-      </div>
+      <div class="field-label" style="margin:14px 0 9px;">Tìm sản phẩm nhanh</div>
+      <div id="qa-list-p">${renderQuickAdd()}</div>
+    </div>
+  `;
+}
 
-      <div class="card">
-        <div class="field-label" style="margin-bottom:9px;">Tìm sản phẩm nhanh</div>
-        <div id="qa-list-p">${renderQuickAdd()}</div>
-      </div>
-    </div>
-    <div class="modal-foot">
-      <button class="btn btn-danger-ghost" data-action="cancel-po">${ICON.x} Hủy đơn</button>
-      ${isNewUnsaved
-        ? `<button class="btn btn-primary btn-block" data-action="create-partner">${ICON.check} Tạo mới</button>`
-        : `<button class="btn btn-primary btn-block" data-action="save-partner">${ICON.check} Lưu thay đổi</button>`
-      }
-    </div>
+function partnerFooterHtml(){
+  const isNewUnsaved = isNewPartner;
+  return `
+    <button class="btn btn-sm btn-danger-ghost" data-action="cancel-po">${ICON.x} Hủy đơn</button>
+    ${isNewUnsaved
+      ? `<button class="btn btn-sm btn-primary btn-block" data-action="create-partner">${ICON.check} Tạo mới</button>`
+      : `<button class="btn btn-sm btn-primary btn-block" data-action="save-partner">${ICON.check} Lưu thay đổi</button>`
+    }
   `;
 }
 
@@ -271,12 +307,18 @@ function renderQuickAdd(){
   const q = (quickAddQuery||'').toLowerCase();
   let products = quickAddProducts;
   if(q) products = products.filter(p=>p.name.toLowerCase().includes(q));
-  if(!products.length) return `<div class="field-note">Không tìm thấy sản phẩm phù hợp.</div>`;
+  const addNewRow = `<div class="quickadd-row overlay-row-quickadd" data-action="partner-quick-add-product">
+      <div class="quickadd-left"><span class="dot avatar-plus" style="width:22px; height:22px; border-radius:50%; display:flex; align-items:center; justify-content:center;">+</span>
+        <div class="quickadd-name">Thêm sản phẩm mới</div>
+      </div>
+      <div class="quickadd-add">${ICON.plus}</div>
+    </div>`;
+  if(!products.length) return addNewRow + `<div class="field-note">Không tìm thấy sản phẩm phù hợp.</div>`;
   const sorted = [...products].sort((a,b)=>{
     const ai = productHistoryIds.indexOf(a.id), bi = productHistoryIds.indexOf(b.id);
     return (bi>=0?1:0) - (ai>=0?1:0);
   });
-  return sorted.map(p=>{
+  return addNewRow + sorted.map(p=>{
     const known = productHistoryIds.includes(p.id);
     return `<div class="quickadd-row" data-action="po-add-line" data-productid="${p.id}">
       <div class="quickadd-left"><span class="dot ${known?'dot-doitac':'dot-kho'}"></span>
@@ -285,6 +327,11 @@ function renderQuickAdd(){
       <div class="quickadd-add">${ICON.plus}</div>
     </div>`;
   }).join('');
+}
+
+function addNewProductAsPOLine(product){
+  quickAddProducts = [product, ...quickAddProducts];
+  poAddLine(product.id);
 }
 
 function wireInputs(){
@@ -443,27 +490,32 @@ function savePartnerForm(){
 
 async function commitPartnerSave(){
   const d = partnerDraft;
+  // Chụp lại id ngay tại thời điểm lưu — nếu người dùng chuyển sang xem đối tác khác trước khi
+  // bấm "Hoàn tác" trên toast, partnerId (biến toàn cục) có thể đã trỏ sang đối tác khác, khiến
+  // hoàn tác ghi đè nhầm lên bản ghi của đối tác đang xem lúc đó.
+  const savedPartnerId = partnerId;
   try{
-    const before = await getPartner(partnerId);
+    const before = await getPartner(savedPartnerId);
     const beforeC1 = (before.partner_contacts||[]).find(c=>c.seq===1) || {name:'',phone:''};
     const beforeC2 = (before.partner_contacts||[]).find(c=>c.seq===2) || {name:'',phone:''};
 
-    const updated = await updatePartner(partnerId, { name:d.name.trim(), address:d.address.trim(), facebook_id:d.facebookId.trim() });
+    const updated = await updatePartner(savedPartnerId, { name:d.name.trim(), address:d.address.trim(), facebook_id:d.facebookId.trim() });
     await Promise.all([
-      upsertPartnerContact(partnerId, 1, { name:d.seller1.name.trim(), phone:d.seller1.phone.trim() }),
-      upsertPartnerContact(partnerId, 2, { name:d.seller2.name.trim(), phone:d.seller2.phone.trim() }),
+      upsertPartnerContact(savedPartnerId, 1, { name:d.seller1.name.trim(), phone:d.seller1.phone.trim() }),
+      upsertPartnerContact(savedPartnerId, 2, { name:d.seller2.name.trim(), phone:d.seller2.phone.trim() }),
     ]);
 
-    requestCloseTopModal();
-    resetSearchAndRefresh();
+    openPartnerModal(savedPartnerId);
+    refreshMainCounts();
     showToast(`Đã cập nhật "${updated.name}".`, [], { icon:ICON.check, undo: async ()=>{
       try{
-        await updatePartner(partnerId, { name:before.name, address:before.address, facebook_id:before.facebook_id });
+        await updatePartner(savedPartnerId, { name:before.name, address:before.address, facebook_id:before.facebook_id });
         await Promise.all([
-          upsertPartnerContact(partnerId, 1, { name:beforeC1.name||'', phone:beforeC1.phone||'' }),
-          upsertPartnerContact(partnerId, 2, { name:beforeC2.name||'', phone:beforeC2.phone||'' }),
+          upsertPartnerContact(savedPartnerId, 1, { name:beforeC1.name||'', phone:beforeC1.phone||'' }),
+          upsertPartnerContact(savedPartnerId, 2, { name:beforeC2.name||'', phone:beforeC2.phone||'' }),
         ]);
-        resetSearchAndRefresh();
+        openPartnerModal(savedPartnerId);
+        refreshMainCounts();
         showToast(`Đã hoàn tác thay đổi cho "${before.name}".`, []);
       } catch(err){
         showToast('Không hoàn tác được — kiểm tra lại kết nối mạng.', []);
@@ -478,18 +530,22 @@ function confirmCancelPO(){
   const label = partnerDraft?.name || 'đối tác này';
   openConfirmModal('Hủy đơn hàng?', `Bạn có chắc muốn hủy đơn mua từ "${esc(label)}" không? Không thể hoàn tác thao tác này.`, async ()=>{
     if(isNewPartner){
-      localDraftLines = [];
-      requestCloseTopModal();
+      openPartnerModal(null);
       return;
     }
     try{
       await cancelPurchaseOrder(poRecord.id);
       notifyPurchaseOrdersChanged();
-      requestCloseTopModal();
+      openPartnerModal(partnerId);
     } catch(err){
       showToast('Không hủy được đơn hàng — kiểm tra lại kết nối mạng.', []);
     }
   });
+}
+
+// Gọi lại khi mainScreen.js chuyển về tab Đối tác — xem ghi chú tương tự trong products.js.
+export function repaintPartnerView(){
+  paint();
 }
 
 export function handlePartnerModalAction(action, el){
@@ -502,6 +558,8 @@ export function handlePartnerModalAction(action, el){
     case 'create-partner': saveNewPartnerForm(); return true;
     case 'cancel-po': confirmCancelPO(); return true;
     case 'retry-partner-modal': openPartnerModal(partnerId); return true;
+    case 'partner-quick-add-product': openQuickAddProductPopup(addNewProductAsPOLine); return true;
+    case 'partner-expand-card': expandedCard = el.dataset.card; paint(); return true;
   }
   return false;
 }

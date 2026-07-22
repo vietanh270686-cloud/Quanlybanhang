@@ -21,6 +21,7 @@
   --radius-sm:8px;
   --shadow-card: 0 1px 2px rgba(21,34,56,.04), 0 8px 24px rgba(21,34,56,.06);
   --shadow-modal: 0 20px 60px rgba(21,34,56,.28);
+  --accordion-active-bg:#E3ECF9;
 }
 *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
 html,body{margin:0;padding:0;}
@@ -60,15 +61,15 @@ body{
 
 /* ---------- Header ---------- */
 .topbar{
-  padding:22px 18px 6px;
+  padding:8px 14px 2px;
   display:flex;
   align-items:baseline;
   justify-content:space-between;
 }
-.brand{font-size:19px; font-weight:700; letter-spacing:-.01em;}
-.brand-sub{font-size:11.5px; color:var(--ink-faint); font-weight:500; margin-top:1px;}
+.brand{font-size:15px; font-weight:700; letter-spacing:-.01em;}
+.brand-sub{font-size:9px; color:var(--ink-faint); font-weight:500; margin-top:0;}
 .brand-wrap{display:flex; flex-direction:column;}
-.today-pill{font-size:11px; color:var(--ink-faint); font-weight:500; background:var(--card); border:1px solid var(--line); padding:5px 10px; border-radius:20px;}
+.today-pill{font-size:10px; color:var(--ink-faint); font-weight:500; background:var(--card); border:1px solid var(--line); padding:3px 8px; border-radius:20px;}
 
 /* ---------- Search ---------- */
 .search-wrap{padding:14px 16px 4px;}
@@ -446,5 +447,166 @@ button{font-family:'Inter'; cursor:pointer; border:none; outline:none;}
 .stock-pill.low{background:var(--loss-bg); color:var(--loss);}
 .restock-btn{ background:var(--doitac-bg); color:var(--doitac); border:1px solid #EFDDC0; font-size:11px; font-weight:700; padding:5px 10px; border-radius:8px; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
 .line-refnote.with-stock{display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;}
+
+/* ======================================================================
+   MÀN CHÍNH 3-TAB (Sản phẩm/Khách hàng/Đối tác) — mainScreen.js
+   Chỉ thêm class mới, dùng lại toàn bộ token màu/--radius/--shadow đã có
+   ở :root phía trên. Không đổi/xoá bất kỳ class nào ở trên.
+   ====================================================================== */
+
+/* ---- Khung màn chính, cao cố định giống .modal (92vh mobile / 86vh desktop) để
+   .detail-wrap/.detail-card bên trong cuộn riêng được — #homeView vốn không có
+   chiều cao cố định (chỉ min-height:100vh, cuộn theo trang) như .shell phía trên. ---- */
+.main-screen{height:92vh; display:flex; flex-direction:column; overflow:hidden;}
+@media (min-width:640px){
+  .main-screen{height:86vh;}
+}
+
+/* ---- Tab bar 3 khối ---- */
+.tabbar{display:flex; gap:5px; padding:6px 14px 5px;}
+.tab{
+  flex:1; display:flex; align-items:center; justify-content:center; gap:3px;
+  padding:5px 4px; border-radius:9px; border:1.5px solid var(--line);
+  background:var(--card); font-size:10px; font-weight:700; color:var(--ink-faint);
+}
+.tab svg{width:12px; height:12px; flex:none;}
+.tab.active{background:#F1F5FA; border-color:var(--primary); color:var(--primary);}
+
+/* ---- Thẻ trạng thái: đang xử lý bản ghi nào của khối đang chọn ---- */
+.entity-header{
+  display:flex; align-items:center; justify-content:space-between; gap:8px;
+  background:var(--card); border:1px solid var(--line-soft); border-radius:11px;
+  padding:6px 10px; margin:0 14px 6px; box-shadow:var(--shadow-card);
+}
+.eh-info{min-width:0;}
+.eh-name{font-size:12px; font-weight:700; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.eh-sub{font-size:9px; color:var(--ink-faint); margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.eh-actions{display:flex; gap:6px; flex:none;}
+.eh-actions button{
+  padding:4px 9px; border-radius:7px; border:1px solid var(--line); background:var(--card);
+  font-size:10px; font-weight:700; color:var(--ink); white-space:nowrap;
+}
+.eh-actions button.primary{background:var(--primary); color:#fff; border-color:var(--primary);}
+.entity-header.locked{cursor:pointer; border-style:dashed;}
+.entity-header.locked .eh-name{color:var(--ink-faint);}
+
+/* ---- Khu vực 2 khối con cao bằng nhau, mỗi khối tự cuộn riêng (chưa có mẫu này trước
+   đây trong app — .modal-body vốn chỉ có 1 vùng cuộn duy nhất) ---- */
+.detail-wrap{
+  flex:1; min-height:0; display:flex; flex-direction:column; gap:8px;
+  padding:0 14px 10px; overflow:hidden;
+}
+.detail-card{
+  flex:1; min-height:0; background:var(--card); border:1px solid var(--line-soft);
+  border-radius:14px; display:flex; flex-direction:column; overflow:hidden; box-shadow:var(--shadow-card);
+}
+.detail-card-head{flex:none; padding:8px 10px; border-bottom:1px solid var(--line-soft);}
+.detail-card-head .search-box{padding:7px 10px; border-radius:10px; gap:7px;}
+.detail-card-head .search-box input{font-size:12.5px;}
+.detail-card-head .search-box svg{width:15px; height:15px;}
+.detail-card-head h3{margin:0; font-size:12.5px; font-weight:700; color:var(--ink); text-transform:none;}
+.detail-card-head-row{display:flex; align-items:center; justify-content:space-between; gap:8px;}
+.detail-card-body{flex:1; min-height:0; overflow-y:auto; padding:12px 14px;}
+.detail-card-foot{flex:none; padding:8px 14px 12px; border-top:1px solid var(--line-soft);}
+.locked-card{align-items:center; justify-content:center; cursor:pointer; border-style:dashed;}
+.locked-card:active{background:var(--line-soft);}
+.locked-inner{display:flex; flex-direction:column; align-items:center; gap:6px; padding:18px; text-align:center;}
+.locked-inner svg{width:20px; height:20px; color:var(--ink-faint);}
+.locked-title{font-size:12.5px; font-weight:700; color:var(--ink);}
+.locked-sub{font-size:11px; color:var(--ink-faint); max-width:240px;}
+
+/* ---- Accordion: 2 khối con của Sản phẩm/Khách hàng/Đối tác chỉ 1 khối mở rộng (chiếm phần
+   lớn không gian) tại 1 thời điểm — khối còn lại thu gọn về đúng 1 dòng đầu (tên/ô tìm kiếm),
+   bấm vào dòng đó để đổi khối đang mở. ---- */
+.detail-card.collapsed{flex:none; background:var(--card);}
+.detail-card:not(.collapsed){background:var(--accordion-active-bg);}
+.detail-card.collapsed .detail-card-head{border-bottom:none;}
+.accordion-head{cursor:pointer;}
+.accordion-head:active{background:var(--line-soft);}
+.accordion-head svg{color:var(--ink-faint); flex:none;}
+.accordion-collapsed-value{font-size:13px; font-weight:700; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+
+/* ---- Chân trang gọn của màn 3-tab (Hủy đơn/Lưu thay đổi) — nhỏ hơn .modal-foot vốn dùng
+   cho popup thật, để nhường thêm không gian dọc cho 2 khối nội dung phía trên ---- */
+.main-foot{
+  flex:none; display:flex; gap:8px;
+  padding:6px 14px calc(6px + env(safe-area-inset-bottom));
+  border-top:1px solid var(--line-soft); background:var(--card);
+}
+
+/* ---- Nút "+ Thêm sản phẩm" trong Chi tiết đơn bán/nhập ---- */
+.btn-add-line{
+  padding:6px 11px; border-radius:9px; border:1.5px dashed var(--doitac);
+  background:var(--doitac-bg); color:#8A5A1C; font-size:11.5px; font-weight:700; white-space:nowrap; flex:none;
+}
+/* ---- Dòng "+ Thêm sản phẩm mới" đứng đầu popup tìm-sản-phẩm-để-thêm-vào-đơn ---- */
+.overlay-row-quickadd{border:1.5px dashed var(--doitac) !important; background:var(--doitac-bg) !important;}
+.overlay-row-quickadd .result-title, .overlay-row-quickadd .quickadd-name{color:#8A5A1C;}
+.avatar-plus{background:var(--doitac); color:#fff; font-size:17px; font-weight:800;}
+
+/* ---- Khối "p1" (ngày/tìm kiếm + số liệu tổng) dùng ở Đơn bán/Đơn nhập/Kho hàng/Báo cáo ---- */
+.p1-card{background:var(--card); border:1px solid var(--line-soft); border-radius:14px; margin:0 16px 12px; padding:12px 14px; box-shadow:var(--shadow-card);}
+.p1-row{display:flex; gap:10px; margin-bottom:10px;}
+.p1-row:last-child{margin-bottom:0;}
+.p1-row .field{flex:1; margin-bottom:0;}
+.p1-stats{display:flex; gap:10px;}
+.stat-box{flex:1; background:var(--paper); border-radius:11px; padding:9px 11px; min-width:0;}
+.stat-label{font-size:10px; color:var(--ink-faint); font-weight:700; text-transform:uppercase; letter-spacing:.03em;}
+.stat-value{font-size:14.5px; font-weight:800; font-family:'Sora'; color:var(--ink); margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.stat-value.pos{color:var(--profit);}
+.stat-value.neg{color:var(--loss);}
+.list-wrap{flex:1; min-height:0; overflow-y:auto; padding:0 16px 16px;}
+
+/* ---- Thanh 5 icon cố định dưới cùng (Kho hàng/Đơn bán/Hàng nhập/Công nợ/Báo cáo) ---- */
+.bottomnav{
+  flex:none; display:flex; border-top:1px solid var(--line-soft); background:var(--card);
+  padding:4px 4px calc(4px + env(safe-area-inset-bottom));
+}
+.bn-item{
+  flex:1; display:flex; flex-direction:column; align-items:center; gap:2px;
+  padding:4px 2px; border-radius:10px; position:relative; color:var(--ink-faint); font-size:9px; font-weight:700;
+}
+.bn-item svg{width:16px; height:16px;}
+.bn-item .bn-badge{
+  position:absolute; top:2px; right:14%; background:var(--loss); color:#fff; font-size:9px; font-weight:800;
+  min-width:15px; height:15px; border-radius:8px; display:flex; align-items:center; justify-content:center; padding:0 3px;
+}
+
+/* ---- Thu nhỏ chữ/khoảng cách bên trong 2 khối con (.detail-card) của 3 tab Sản phẩm/
+   Khách hàng/Đối tác — không gian mỗi khối hẹp hơn hẳn 1 modal cao 92vh trước đây (2 khối
+   chia đôi cùng 1 màn), nên các class dùng chung (.field-label/.input/.line-row/.quickadd-row...)
+   cần nhỏ lại RIÊNG trong phạm vi .detail-card-body, không đổi kích thước gốc của các màn
+   modal cũ (Kho hàng/Đơn bán/Hàng nhập/Công nợ) vẫn đang dùng nguyên kích thước cũ. ---- */
+.detail-card-body .field-label{font-size:9.5px; margin-bottom:4px;}
+.detail-card-body .field{margin-bottom:9px;}
+.detail-card-body .input, .detail-card-body .readonly-field{font-size:12.5px; padding:8px 10px;}
+.detail-card-body .field-note{font-size:9.5px;}
+.detail-card-body .field-error{font-size:10px;}
+.detail-card-body .form-warning{font-size:11px; padding:8px 10px;}
+.detail-card-body .source-row, .detail-card-body .contact-row{padding:8px 10px;}
+.detail-card-body .source-name, .detail-card-body .source-price, .detail-card-body .contact-name{font-size:12px;}
+.detail-card-body .source-time, .detail-card-body .contact-phone{font-size:9.5px;}
+.detail-card-body .line-row{padding:6px 8px; margin-bottom:6px;}
+.detail-card-body .line-name{font-size:11.5px;}
+.detail-card-body .line-bottom{margin-top:5px;}
+.detail-card-body .line-src, .detail-card-body .line-refnote{font-size:9px; margin-top:3px;}
+.detail-card-body .line-total{font-size:12px; min-width:52px;}
+.detail-card-body .qty-btn{width:21px; height:21px; font-size:11px;}
+.detail-card-body .qty-input{width:26px; height:21px; font-size:11px;}
+.detail-card-body .price-input{font-size:11px; padding:4px 6px; width:66px;}
+.detail-card-body .order-total-bar{padding:9px 11px; margin-top:8px;}
+.detail-card-body .order-total-label{font-size:10.5px;}
+.detail-card-body .order-total-value{font-size:15px;}
+.detail-card-body .quickadd-row{padding:8px 9px;}
+.detail-card-body .quickadd-name{font-size:12px;}
+.detail-card-body .quickadd-price{font-size:10px;}
+.detail-card-body .quickadd-add{width:22px; height:22px;}
+.detail-card-body .demand-head, .detail-card-body .demand-item{font-size:11px;}
+
+/* ---- Nút ở chân màn 3-tab (Hủy đơn / Lưu thay đổi / Tạo mới) nhỏ gọn hơn nút mặc định,
+   để dành không gian hiển thị cho 2 khối con phía trên. ---- */
+#mainFooter .btn{padding:7px 10px; font-size:11px; border-radius:9px; white-space:nowrap; flex:none;}
+#mainFooter .btn.btn-block{flex:1;}
+#mainFooter .btn svg{width:13px; height:13px;}
 
 ::selection{background:#CBDCEC;}

@@ -1,18 +1,16 @@
 import './style.css';
 import { initAuth, renderLoginView, hideLoginView, signOut } from './auth.js';
-import { renderHome, clearSearch } from './home.js';
+import { renderMainScreen, handleMainScreenAction } from './mainScreen.js';
 import { requestCloseTopModal, takePendingConfirmAction } from './modal.js';
-import { openProductModal, handleProductModalAction } from './products.js';
-import { openCustomerModal, handleCustomerModalAction } from './customers.js';
+import { handleProductModalAction } from './products.js';
+import { handleCustomerModalAction } from './customers.js';
 import { openSalesScreen, handleSalesScreenAction } from './salesOrdersScreen.js';
-import { openPartnerModal, handlePartnerModalAction } from './partners.js';
+import { handlePartnerModalAction } from './partners.js';
 import { openPurchaseScreen, handlePurchaseScreenAction } from './purchaseOrdersScreen.js';
 import { openDebtScreen, handleDebtScreenAction } from './debtScreen.js';
-import { openProductMenu, handleProductMenuAction } from './productsMenu.js';
-import { openCustomerMenu, handleCustomerMenuAction } from './customersMenu.js';
-import { openPartnerMenu, handlePartnerMenuAction } from './partnersMenu.js';
 import { openWarehouseScreen, handleWarehouseAction } from './warehouseScreen.js';
 import { handleRestockModalAction } from './restockModal.js';
+import { openReportsScreen, handleReportsScreenAction } from './reportsScreen.js';
 
 let appStarted = false;
 
@@ -23,7 +21,7 @@ initAuth(session=>{
       appStarted = true;
       startAppEvents();
     }
-    renderHome();
+    renderMainScreen();
   } else {
     appStarted = false;
     renderLoginView();
@@ -42,21 +40,14 @@ function startAppEvents(){
     if(handlePartnerModalAction(action, el)) return;
     if(handlePurchaseScreenAction(action, el)) return;
     if(handleDebtScreenAction(action, el)) return;
-    if(handleProductMenuAction(action, el)) return;
-    if(handleCustomerMenuAction(action, el)) return;
-    if(handlePartnerMenuAction(action, el)) return;
     if(handleWarehouseAction(action, el)) return;
     if(handleRestockModalAction(action, el)) return;
+    if(handleReportsScreenAction(action, el)) return;
+    if(handleMainScreenAction(action, el)) return;
 
     switch(action){
       case 'logout':
         await signOut();
-        break;
-      case 'clear-search':
-        clearSearch();
-        break;
-      case 'retry-home':
-        renderHome();
         break;
       case 'close-modal':
         requestCloseTopModal();
@@ -69,20 +60,8 @@ function startAppEvents(){
         if(fn) fn();
         break;
       }
-      case 'open-product':
-        openProductModal(el.dataset.id || null);
-        break;
-      case 'create-from-search':
-        openProductModal(null);
-        break;
-      case 'open-customer':
-        openCustomerModal(el.dataset.id || null);
-        break;
       case 'open-sales-screen':
         openSalesScreen();
-        break;
-      case 'open-partner':
-        openPartnerModal(el.dataset.id || null);
         break;
       case 'open-purchase-screen':
         openPurchaseScreen();
@@ -90,17 +69,11 @@ function startAppEvents(){
       case 'open-debt-screen':
         openDebtScreen();
         break;
-      case 'open-product-menu':
-        openProductMenu();
-        break;
-      case 'open-customer-menu':
-        openCustomerMenu();
-        break;
-      case 'open-partner-menu':
-        openPartnerMenu();
-        break;
       case 'open-warehouse':
         openWarehouseScreen();
+        break;
+      case 'open-reports-screen':
+        openReportsScreen();
         break;
     }
   });

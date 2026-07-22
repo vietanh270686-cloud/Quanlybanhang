@@ -5,6 +5,8 @@ import { showToast } from './toast.js';
 import {
   listPurchaseOrdersByDate, getPurchaseOrder, cancelPurchaseOrder, closePurchaseOrder, poTotal,
 } from './api/purchaseOrders.js';
+import { getPartner } from './api/partners.js';
+import { recordPayment } from './api/debt.js';
 
 let screenWrap = null;
 let selectedDate = todayStr();
@@ -111,6 +113,7 @@ function renderPOCard(o){
       ${o.status==='moi' ? `
       <div class="order-actions">
         <button class="btn btn-danger-ghost btn-sm" data-action="cancel-po-list" data-id="${o.id}" data-name="${esc(partnerName)}">${ICON.x} Hủy</button>
+        <button class="btn btn-primary btn-sm" data-action="pay-po-list" data-id="${o.id}" data-partnerid="${o.partner_id}" data-name="${esc(partnerName)}" data-total="${total}">${ICON.check} Thanh toán</button>
         <button class="btn btn-kho btn-sm" data-action="close-po-list" data-id="${o.id}">${ICON.check} Chốt</button>
       </div>` : ''}
     </div>
@@ -215,11 +218,42 @@ function confirmCancelPOFromList(id, name){
   });
 }
 
+// Chốt đơn + ghi nhận luôn thanh toán đúng bằng giá trị đơn cho đối tác đó (trả tiền ngay khi
+// nhập hàng) — dùng lại đúng RPC close_purchase_order (cộng nợ) rồi recordPayment (trừ lại nợ
+// vừa cộng), nên công nợ đối tác không đổi ròng nhưng lịch sử vẫn ghi đủ cả 2 giao dịch.
+function confirmPayPOFromList(id, partnerId, name, total){
+  openConfirmModal('Xác nhận thanh toán?', `Bạn có đồng ý thực hiện thanh toán ${fmtVND(total)} và chốt đơn mua từ "${esc(name||'đối tác này')}" không?`, ()=>commitPayPOFromList(id, partnerId, total));
+}
+async function commitPayPOFromList(id, partnerId, total){
+  try{
+    const diffs = await closePurchaseOrder(id);
+    const fresh = await getPartner(partnerId);
+    await recordPayment('partner', partnerId, total, todayStr(), fresh.debt||0);
+    await loadOrdersForDate();
+    if(diffs && diffs.length){
+      const warnings = diffs.map(d=>{
+        if(d.diff_type==='bu_thieu'){
+          const thieu = d.suggested - d.purchased;
+          return `${d.product_name}: mua ${d.purchased}/${d.suggested} cần — thiếu ${thieu}, đã lấy bù từ "Trong kho".`;
+        }
+        const du = d.purchased - d.suggested;
+        return `${d.product_name}: mua ${d.purchased}/${d.suggested} cần — dư ${du}, đã nhập vào "Trong kho".`;
+      });
+      showToast('Đã chốt đơn và ghi nhận thanh toán — có chênh lệch so với gợi ý:', warnings);
+    } else {
+      showToast('Đã chốt đơn và ghi nhận thanh toán.', []);
+    }
+  } catch(err){
+    showToast('Không thực hiện được — kiểm tra lại kết nối mạng.', []);
+  }
+}
+
 export function handlePurchaseScreenAction(action, el){
   switch(action){
     case 'view-po-detail': viewPODetail(el.dataset.id); return true;
     case 'close-po-list': closePOFromList(el.dataset.id); return true;
     case 'cancel-po-list': confirmCancelPOFromList(el.dataset.id, el.dataset.name); return true;
+    case 'pay-po-list': confirmPayPOFromList(el.dataset.id, el.dataset.partnerid, el.dataset.name, parseFloat(el.dataset.total)||0); return true;
     case 'retry-purchase-screen': loadOrdersForDate(); return true;
   }
   return false;

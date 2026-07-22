@@ -1,8 +1,7 @@
 import { ICON } from './icons.js';
 import { esc, fmtVND, facebookProfileUrl } from './utils.js';
-import { openModal, rerenderTopModal, requestCloseTopModal, openConfirmModal, loadingSkeleton, errorBanner } from './modal.js';
+import { openConfirmModal, loadingSkeleton } from './modal.js';
 import { showToast } from './toast.js';
-import { searchQuery, resetSearchAndRefresh } from './home.js';
 import { getCustomer, createCustomer, updateCustomer } from './api/customers.js';
 import { findByExactName } from './supabaseClient.js';
 import {
@@ -12,7 +11,10 @@ import {
 import { searchProductsByName, getLatestImportPriceMap } from './api/products.js';
 import { notifySalesOrdersChanged } from './salesOrdersScreen.js';
 import { openRestockModal } from './restockModal.js';
+import { paintEntityView, openQuickAddProductPopup, refreshMainCounts } from './mainScreen.js';
 
+// LƯU Ý DI TRÚ: xem ghi chú tương tự ở đầu products.js — "Khách hàng" giờ là 1 tab cố định của
+// mainScreen.js, vẽ qua paintEntityView() thay vì tự mở modal. Toàn bộ logic nghiệp vụ giữ nguyên.
 let customerId = null;
 let isNewCustomer = false;
 let customerDraft = null;       // {name, phone, address, type, errors}
@@ -24,17 +26,23 @@ let quickAddQuery = '';
 let quickAddProducts = [];
 let latestImportMap = {};
 let modalLoadError = null;
+// Khối nào đang mở rộng (chiếm phần lớn không gian) — mặc định mở khối đơn hàng vì đây là
+// thao tác chính (thêm sản phẩm bán); khối thông tin khách hàng thu gọn còn 1 dòng tên,
+// bấm vào để đổi chỗ (accordion — chỉ 1 khối mở rộng tại 1 thời điểm).
+let expandedCard = 'orders'; // 'info' | 'orders'
 
 export async function openCustomerModal(idOrNull){
+  if(idOrNull !== customerId) expandedCard = 'orders'; // chuyển sang khách khác -> về mặc định
   isNewCustomer = !idOrNull;
   customerId = idOrNull;
   modalLoadError = null;
+  customerDraft = null;
   soRecord = null; soLines = []; localDraftLines = []; localLineSeq = 0;
   quickAddQuery = '';
 
   // Khách mới chỉ được tạo khi bấm nút "Tạo mới" — đóng popup theo cách khác (backdrop,
   // nút X, Hủy đơn) sẽ bỏ dở hoàn toàn, không tự lưu.
-  openModal(loadingModalHtml(isNewCustomer ? 'Khách hàng mới' : 'Khách hàng'));
+  paint();
 
   try{
     const [products, importMap] = await Promise.all([ searchProductsByName(''), getLatestImportPriceMap() ]);
@@ -42,7 +50,7 @@ export async function openCustomerModal(idOrNull){
     latestImportMap = importMap;
 
     if(isNewCustomer){
-      customerDraft = { name: searchQuery || '', phone:'', address:'', facebookId:'', type:'le', errors:{} };
+      customerDraft = { name:'', phone:'', address:'', facebookId:'', type:'le', errors:{} };
     } else {
       const cust = await getCustomer(customerId);
       customerDraft = { name:cust.name, phone:cust.phone||'', address:cust.address||'', facebookId:cust.facebook_id||'', type:cust.customer_type, errors:{} };
@@ -96,28 +104,32 @@ async function commitNewCustomer(typedName){
       }
       notifySalesOrdersChanged();
     }
-    requestCloseTopModal();
-    resetSearchAndRefresh();
+    openCustomerModal(newCust.id);
+    refreshMainCounts();
     showToast(`Đã tạo khách hàng "${typedName}".`, [], { icon:ICON.check });
   } catch(err){
     showToast(`Không lưu được khách hàng "${typedName}" — kiểm tra lại kết nối mạng.`, []);
   }
 }
 
-function loadingModalHtml(title){
-  return `
-    <div class="modal-handle"></div>
-    <div class="modal-head">
-      <div class="modal-title">${esc(title)}</div>
-      <div class="icon-btn" data-action="close-modal">${ICON.close}</div>
-    </div>
-    <div class="modal-body"><div class="card">${loadingSkeleton(4)}</div></div>
-  `;
-}
-
 function paint(){
-  rerenderTopModal(customerModalHtml());
-  wireInputs();
+  if(modalLoadError){
+    paintEntityView('khach', { error:true, retryAction:'retry-customer-modal' });
+    return;
+  }
+  if(!customerDraft){
+    paintEntityView('khach', { loading:true });
+    return;
+  }
+  const isNewUnsaved = isNewCustomer;
+  paintEntityView('khach', {
+    id: isNewUnsaved ? null : customerId,
+    name: isNewUnsaved ? 'Khách hàng mới' : (customerDraft.name || '(chưa đặt tên)'),
+    sub: isNewUnsaved ? 'Chưa lưu' : (customerDraft.type==='si' ? 'Khách sỉ' : 'Khách lẻ'),
+    bodyHtml: customerDetailCardsHtml(),
+    footerHtml: customerFooterHtml(),
+    wire: wireInputs,
+  });
 }
 
 function displayLines(){
@@ -139,102 +151,126 @@ function currentTotal(){
   return displayLines().reduce((s,l)=> s + l.qty*l.sellPrice, 0);
 }
 
-function customerModalHtml(){
-  if(modalLoadError){
-    return `
-      <div class="modal-handle"></div>
-      <div class="modal-head"><div class="modal-title">Khách hàng</div><div class="icon-btn" data-action="close-modal">${ICON.close}</div></div>
-      <div class="modal-body">${errorBanner('Không tải được dữ liệu khách hàng — kiểm tra lại kết nối mạng.', { retryAction:'retry-customer-modal' })}</div>
-    `;
-  }
-  if(!customerDraft) return loadingModalHtml('Khách hàng');
+function customerDetailCardsHtml(){
+  const infoOpen = expandedCard === 'info';
+  return `
+    <div class="detail-card ${infoOpen?'':'collapsed'}">
+      ${infoOpen ? infoCardOpenHtml() : infoCardCollapsedHtml()}
+    </div>
+    <div class="detail-card ${infoOpen?'collapsed':''}">
+      ${infoOpen ? ordersCardCollapsedHtml() : ordersCardOpenHtml()}
+    </div>
+  `;
+}
 
+function infoCardCollapsedHtml(){
+  const d = customerDraft;
+  return `
+    <div class="detail-card-head accordion-head" data-action="cust-expand-card" data-card="info">
+      <div class="detail-card-head-row">
+        <div class="eh-info">
+          <div class="field-label" style="margin-bottom:2px;">Tên khách hàng</div>
+          <div class="accordion-collapsed-value">${esc(d.name||'(chưa đặt tên)')}</div>
+        </div>
+        ${ICON.chevRight}
+      </div>
+    </div>
+  `;
+}
+
+function infoCardOpenHtml(){
   const d = customerDraft;
   const errors = d.errors || {};
+  const canCall = !isNewCustomer;
+  return `
+    <div class="detail-card-body">
+      ${errors.any ? `<div class="form-warning">${ICON.warn} Cần nhập Tên khách hàng.</div>` : ''}
+      <div class="field">
+        <div class="field-label">Tên khách hàng</div>
+        <input class="input ${errors.name?'error':''}" id="cf-name" value="${esc(d.name)}" placeholder="VD: Chị Mai">
+        ${errors.name?`<div class="field-error">${ICON.warn} Chưa nhập tên khách hàng</div>`:''}
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <div class="field-label">Số điện thoại</div>
+          <input class="input" id="cf-phone" value="${esc(d.phone)}" placeholder="VD: 0912345678 (không bắt buộc)">
+        </div>
+        ${canCall && d.phone ? `
+        <div style="display:flex; align-items:flex-end; gap:8px; padding-bottom:1px;">
+          <a class="round-btn call" href="tel:${d.phone}">${ICON.phone}</a>
+          <a class="round-btn zalo" href="https://zalo.me/${d.phone}" target="_blank" rel="noopener">Z</a>
+        </div>` : ''}
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <div class="field-label">ID / link Facebook</div>
+          <input class="input" id="cf-facebook" value="${esc(d.facebookId)}" placeholder="VD: nguyen.van.a hoặc 100012345678 (không bắt buộc)">
+          <div class="field-note">Dùng để mở Messenger gửi bill từ màn Đơn bán.</div>
+        </div>
+        ${canCall && d.facebookId ? `
+        <div style="display:flex; align-items:flex-end; padding-bottom:1px;">
+          <a class="round-btn facebook" href="${facebookProfileUrl(d.facebookId)}" target="_blank" rel="noopener">${ICON.facebook}</a>
+        </div>` : ''}
+      </div>
+      <div class="field">
+        <div class="field-label">Địa chỉ</div>
+        <input class="input" id="cf-address" value="${esc(d.address)}" placeholder="Không bắt buộc">
+      </div>
+      <div class="field">
+        <div class="field-label">Loại khách hàng</div>
+        <div style="display:flex; gap:8px;">
+          <button type="button" class="btn ${d.type==='le'?'btn-primary':'btn-ghost'}" style="flex:1;" data-action="set-customer-type" data-type="le">Bán lẻ</button>
+          <button type="button" class="btn ${d.type==='si'?'btn-primary':'btn-ghost'}" style="flex:1;" data-action="set-customer-type" data-type="si">Bán sỉ</button>
+        </div>
+        <div class="field-note">Quyết định giá bán mặc định khi thêm sản phẩm vào đơn (giá lẻ hoặc giá sỉ).</div>
+      </div>
+    </div>
+  `;
+}
+
+function ordersCardCollapsedHtml(){
+  const count = displayLines().length;
+  return `
+    <div class="detail-card-head accordion-head" data-action="cust-expand-card" data-card="orders">
+      <div class="detail-card-head-row">
+        <div class="search-box" style="pointer-events:none;">${ICON.search}<span class="accordion-collapsed-value" style="color:var(--ink-faint); font-weight:400;">Tìm sản phẩm… (${count} trong đơn)</span></div>
+      </div>
+    </div>
+  `;
+}
+
+function ordersCardOpenHtml(){
   const lines = displayLines();
   const total = currentTotal();
-  const isNewUnsaved = isNewCustomer;
-  const canCall = !isNewUnsaved;
-
   return `
-    <div class="modal-handle"></div>
-    <div class="modal-head">
-      <div class="modal-title">${isNewUnsaved ? 'Khách hàng mới' : esc(d.name||'Khách hàng')}</div>
-      <div class="icon-btn" data-action="close-modal">${ICON.close}</div>
-    </div>
-    <div class="modal-body">
-      ${errors.any ? `<div class="form-warning">${ICON.warn} Cần nhập Tên khách hàng.</div>` : ''}
-      <div class="card">
-        <div class="field">
-          <div class="field-label">Tên khách hàng</div>
-          <input class="input ${errors.name?'error':''}" id="cf-name" value="${esc(d.name)}" placeholder="VD: Chị Mai">
-          ${errors.name?`<div class="field-error">${ICON.warn} Chưa nhập tên khách hàng</div>`:''}
-        </div>
-        <div class="field-row">
-          <div class="field">
-            <div class="field-label">Số điện thoại</div>
-            <input class="input" id="cf-phone" value="${esc(d.phone)}" placeholder="VD: 0912345678 (không bắt buộc)">
-          </div>
-          ${canCall && d.phone ? `
-          <div style="display:flex; align-items:flex-end; gap:8px; padding-bottom:1px;">
-            <a class="round-btn call" href="tel:${d.phone}">${ICON.phone}</a>
-            <a class="round-btn zalo" href="https://zalo.me/${d.phone}" target="_blank" rel="noopener">Z</a>
-          </div>` : ''}
-        </div>
-        <div class="field-row">
-          <div class="field">
-            <div class="field-label">ID / link Facebook</div>
-            <input class="input" id="cf-facebook" value="${esc(d.facebookId)}" placeholder="VD: nguyen.van.a hoặc 100012345678 (không bắt buộc)">
-            <div class="field-note">Dùng để mở Messenger gửi bill từ màn Đơn bán.</div>
-          </div>
-          ${canCall && d.facebookId ? `
-          <div style="display:flex; align-items:flex-end; padding-bottom:1px;">
-            <a class="round-btn facebook" href="${facebookProfileUrl(d.facebookId)}" target="_blank" rel="noopener">${ICON.facebook}</a>
-          </div>` : ''}
-        </div>
-        <div class="field">
-          <div class="field-label">Địa chỉ</div>
-          <input class="input" id="cf-address" value="${esc(d.address)}" placeholder="Không bắt buộc">
-        </div>
-        <div class="field">
-          <div class="field-label">Loại khách hàng</div>
-          <div style="display:flex; gap:8px;">
-            <button type="button" class="btn ${d.type==='le'?'btn-primary':'btn-ghost'}" style="flex:1;" data-action="set-customer-type" data-type="le">Bán lẻ</button>
-            <button type="button" class="btn ${d.type==='si'?'btn-primary':'btn-ghost'}" style="flex:1;" data-action="set-customer-type" data-type="si">Bán sỉ</button>
-          </div>
-          <div class="field-note">Quyết định giá bán mặc định khi thêm sản phẩm vào đơn (giá lẻ hoặc giá sỉ).</div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="field-label" style="margin-bottom:9px;">Sản phẩm trong đơn (${lines.length})</div>
-        <div id="so-lines">${renderSOLines(lines)}</div>
-        ${!lines.length?`<div class="field-note">Chưa có sản phẩm — tìm và thêm ở dưới.</div>`:''}
-        <div class="order-total-bar">
-          <div class="order-total-label">Tổng tiền đơn</div>
-          <div class="order-total-value">${fmtVND(total)}</div>
-        </div>
-      </div>
-
-      <div class="card" style="margin-bottom:12px;">
-        <div class="search-box">
-          ${ICON.search}
-          <input id="qa-search" placeholder="Tìm sản phẩm…" value="${esc(quickAddQuery)}" autocomplete="off">
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="field-label" style="margin-bottom:9px;">Thêm sản phẩm nhanh</div>
-        <div id="qa-list">${renderQuickAdd()}</div>
+    <div class="detail-card-head">
+      <div class="search-box">
+        ${ICON.search}
+        <input id="qa-search" placeholder="Tìm sản phẩm…" value="${esc(quickAddQuery)}" autocomplete="off">
       </div>
     </div>
-    <div class="modal-foot">
-      <button class="btn btn-danger-ghost" data-action="cancel-so">${ICON.x} Hủy đơn</button>
-      ${isNewUnsaved
-        ? `<button class="btn btn-primary btn-block" data-action="create-customer">${ICON.check} Tạo mới</button>`
-        : `<button class="btn btn-primary btn-block" data-action="save-customer">${ICON.check} Lưu thay đổi</button>`
-      }
+    <div class="detail-card-body">
+      <div class="field-label" style="margin-bottom:9px;">Sản phẩm trong đơn (${lines.length})</div>
+      <div id="so-lines">${renderSOLines(lines)}</div>
+      ${!lines.length?`<div class="field-note">Chưa có sản phẩm — tìm và thêm ở dưới.</div>`:''}
+      <div class="order-total-bar">
+        <div class="order-total-label">Tổng tiền đơn</div>
+        <div class="order-total-value">${fmtVND(total)}</div>
+      </div>
+      <div class="field-label" style="margin:14px 0 9px;">Thêm sản phẩm nhanh</div>
+      <div id="qa-list">${renderQuickAdd()}</div>
     </div>
+  `;
+}
+
+function customerFooterHtml(){
+  const isNewUnsaved = isNewCustomer;
+  return `
+    <button class="btn btn-sm btn-danger-ghost" data-action="cancel-so">${ICON.x} Hủy đơn</button>
+    ${isNewUnsaved
+      ? `<button class="btn btn-sm btn-primary btn-block" data-action="create-customer">${ICON.check} Tạo mới</button>`
+      : `<button class="btn btn-sm btn-primary btn-block" data-action="save-customer">${ICON.check} Lưu thay đổi</button>`
+    }
   `;
 }
 
@@ -272,9 +308,15 @@ function renderQuickAdd(){
   const q = (quickAddQuery||'').toLowerCase();
   let products = quickAddProducts;
   if(q) products = products.filter(p=>p.name.toLowerCase().includes(q));
-  if(!products.length) return `<div class="field-note">Không tìm thấy sản phẩm phù hợp.</div>`;
   const custType = customerDraft.type;
-  return products.map(p=>{
+  const addNewRow = `<div class="quickadd-row overlay-row-quickadd" data-action="cust-quick-add-product">
+      <div class="quickadd-left"><span class="dot avatar-plus" style="width:22px; height:22px; border-radius:50%; display:flex; align-items:center; justify-content:center;">+</span>
+        <div class="quickadd-name">Thêm sản phẩm mới</div>
+      </div>
+      <div class="quickadd-add">${ICON.plus}</div>
+    </div>`;
+  if(!products.length) return addNewRow + `<div class="field-note">Không tìm thấy sản phẩm phù hợp.</div>`;
+  return addNewRow + products.map(p=>{
     const price = custType==='si' ? p.sell_price_wholesale : p.sell_price_retail;
     return `<div class="quickadd-row" data-action="so-add-line" data-productid="${p.id}">
       <div class="quickadd-left"><span class="dot dot-kho"></span>
@@ -283,6 +325,11 @@ function renderQuickAdd(){
       <div class="quickadd-add">${ICON.plus}</div>
     </div>`;
   }).join('');
+}
+
+function addNewProductAsLine(product){
+  quickAddProducts = [product, ...quickAddProducts];
+  soAddLine(product.id);
 }
 
 function wireInputs(){
@@ -411,24 +458,29 @@ async function setCustomerType(newType){
   if(customerDraft.type === newType) return;
   const oldType = customerDraft.type;
   const beforeLines = displayLines().map(l=>({ id:l.id, sellPrice:l.sellPrice }));
+  // Chụp lại danh tính khách hàng/trạng thái đang sửa — nếu người dùng chuyển sang khách khác
+  // trước khi bấm "Hoàn tác" trên toast, các biến toàn cục (customerId/soLines/isNewCustomer)
+  // sẽ trỏ sang khách mới, khiến hoàn tác ghi đè nhầm dữ liệu nếu không chụp lại từ đầu.
+  const savedCustomerId = customerId;
+  const wasNewCustomer = isNewCustomer;
 
   customerDraft.type = newType;
   if(isNewCustomer){
     localDraftLines.forEach(l=>{ l.sellPrice = newType==='si' ? l.sellPriceWholesale : l.sellPriceRetail; });
     paint();
-    showUndoTypeToast(newType, oldType, beforeLines);
+    showUndoTypeToast(newType, oldType, beforeLines, savedCustomerId, wasNewCustomer);
     return;
   }
 
   try{
-    await updateCustomer(customerId, { customer_type:newType });
+    await updateCustomer(savedCustomerId, { customer_type:newType });
     await Promise.all(soLines.map(async l=>{
       const newPrice = newType==='si' ? l.products?.sell_price_wholesale : l.products?.sell_price_retail;
       const idx = soLines.findIndex(x=>x.id===l.id);
       soLines[idx] = await updateSOLine(l.id, { sell_price: newPrice });
     }));
     paint();
-    showUndoTypeToast(newType, oldType, beforeLines);
+    showUndoTypeToast(newType, oldType, beforeLines, savedCustomerId, wasNewCustomer);
   } catch(err){
     customerDraft.type = oldType;
     showToast('Không đổi được loại khách hàng — kiểm tra lại kết nối mạng.', []);
@@ -436,16 +488,22 @@ async function setCustomerType(newType){
   }
 }
 
-function showUndoTypeToast(newType, oldType, beforeLines){
+function showUndoTypeToast(newType, oldType, beforeLines, savedCustomerId, wasNewCustomer){
   const label = newType==='si' ? 'Bán sỉ' : 'Bán lẻ';
   showToast(`Đã đổi sang "${label}" — đơn giá các sản phẩm trong đơn đã cập nhật.`, [], { icon:ICON.check, undo: async ()=>{
+    // Nếu đã chuyển sang xem khách hàng khác thì bỏ qua hoàn tác ở đây (tránh ghi đè nhầm dữ
+    // liệu của khách đang xem) — dữ liệu khách cũ vẫn đúng trong DB, chỉ cần vào lại sửa tay.
+    if(savedCustomerId !== customerId || wasNewCustomer !== isNewCustomer){
+      showToast('Không thể hoàn tác — bạn đã chuyển sang khách hàng khác. Vào lại khách hàng đó để sửa tay nếu cần.', []);
+      return;
+    }
     customerDraft.type = oldType;
     if(isNewCustomer){
       beforeLines.forEach(b=>{ const line = localDraftLines.find(x=>x.localId===b.id); if(line) line.sellPrice = b.sellPrice; });
       paint();
     } else {
       try{
-        await updateCustomer(customerId, { customer_type:oldType });
+        await updateCustomer(savedCustomerId, { customer_type:oldType });
         await Promise.all(beforeLines.map(async b=>{
           const idx = soLines.findIndex(x=>x.id===b.id);
           if(idx!==-1) soLines[idx] = await updateSOLine(b.id, { sell_price: b.sellPrice });
@@ -471,18 +529,23 @@ function saveCustomerForm(){
 
 async function commitCustomerSave(){
   const d = customerDraft;
+  // Chụp lại id ngay tại thời điểm lưu — nếu người dùng chuyển sang xem khách hàng khác trước
+  // khi bấm "Hoàn tác" trên toast, customerId (biến toàn cục) có thể đã trỏ sang khách khác,
+  // khiến hoàn tác ghi đè nhầm lên bản ghi của khách đang xem lúc đó.
+  const savedCustomerId = customerId;
   try{
-    const before = await getCustomer(customerId);
-    const updated = await updateCustomer(customerId, {
+    const before = await getCustomer(savedCustomerId);
+    const updated = await updateCustomer(savedCustomerId, {
       name: d.name.trim(), phone: d.phone.trim(), address: d.address.trim(),
       facebook_id: d.facebookId.trim(), customer_type: d.type,
     });
-    requestCloseTopModal();
-    resetSearchAndRefresh();
+    openCustomerModal(savedCustomerId);
+    refreshMainCounts();
     showToast(`Đã cập nhật "${updated.name}".`, [], { icon:ICON.check, undo: async ()=>{
       try{
-        await updateCustomer(customerId, { name:before.name, phone:before.phone, address:before.address, facebook_id:before.facebook_id, customer_type:before.customer_type });
-        resetSearchAndRefresh();
+        await updateCustomer(savedCustomerId, { name:before.name, phone:before.phone, address:before.address, facebook_id:before.facebook_id, customer_type:before.customer_type });
+        openCustomerModal(savedCustomerId);
+        refreshMainCounts();
         showToast(`Đã hoàn tác thay đổi cho "${before.name}".`, []);
       } catch(err){
         showToast('Không hoàn tác được — kiểm tra lại kết nối mạng.', []);
@@ -497,14 +560,13 @@ function confirmCancelSO(){
   const label = isNewCustomer ? (customerDraft.name||'khách này') : (customerDraft?.name||'khách này');
   openConfirmModal('Hủy đơn hàng?', `Bạn có chắc muốn hủy đơn hàng của "${esc(label)}" không? Không thể hoàn tác thao tác này.`, async ()=>{
     if(isNewCustomer){
-      localDraftLines = [];
-      requestCloseTopModal();
+      openCustomerModal(null);
       return;
     }
     try{
       await cancelSalesOrder(soRecord.id);
       notifySalesOrdersChanged();
-      requestCloseTopModal();
+      openCustomerModal(customerId);
     } catch(err){
       showToast('Không hủy được đơn hàng — kiểm tra lại kết nối mạng.', []);
     }
@@ -536,6 +598,11 @@ function handleRestocked({ productId, stockQty, importPrice }){
   paint();
 }
 
+// Gọi lại khi mainScreen.js chuyển về tab Khách hàng — xem ghi chú tương tự trong products.js.
+export function repaintCustomerView(){
+  paint();
+}
+
 export function handleCustomerModalAction(action, el){
   switch(action){
     case 'so-remove-line': soRemoveLine(el.dataset.lineid); return true;
@@ -547,6 +614,8 @@ export function handleCustomerModalAction(action, el){
     case 'cancel-so': confirmCancelSO(); return true;
     case 'retry-customer-modal': openCustomerModal(customerId); return true;
     case 'open-restock': openRestockModal(el.dataset.productid, parseInt(el.dataset.orderqty), handleRestocked); return true;
+    case 'cust-quick-add-product': openQuickAddProductPopup(addNewProductAsLine); return true;
+    case 'cust-expand-card': expandedCard = el.dataset.card; paint(); return true;
   }
   return false;
 }

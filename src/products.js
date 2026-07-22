@@ -1,8 +1,7 @@
 import { ICON } from './icons.js';
 import { esc, fmtVND, timeAgo, debounce } from './utils.js';
-import { openModal, rerenderTopModal, requestCloseTopModal, openConfirmModal, loadingSkeleton, errorBanner } from './modal.js';
+import { openConfirmModal, loadingSkeleton } from './modal.js';
 import { showToast } from './toast.js';
-import { searchQuery, resetSearchAndRefresh } from './home.js';
 import {
   getProduct, createProduct, updateProduct, deleteProduct,
   getPartnerHistoryForProduct, setPartnerPrice, deletePartnerPrice,
@@ -11,18 +10,28 @@ import {
 import { findByExactName } from './supabaseClient.js';
 import { addToPartnerDraftOrder, updatePOLine, deletePOLine } from './api/purchaseOrders.js';
 import { notifyPurchaseOrdersChanged } from './purchaseOrdersScreen.js';
+import { paintEntityView, refreshMainCounts } from './mainScreen.js';
 
+// LƯU Ý DI TRÚ: file này trước đây mở modal riêng (openModal/rerenderTopModal) cho khối Sản
+// phẩm. Từ bản 3-tab, "Sản phẩm" là 1 trong 3 tab cố định của mainScreen.js — mọi HTML vẽ ra ở
+// đây (productDetailCardsHtml/productFooterHtml) được giao lại cho mainScreen.js qua
+// paintEntityView() thay vì tự mở modal. TOÀN BỘ logic nghiệp vụ bên dưới (lưu/xoá/kiểm tra
+// trùng tên/chọn đối tác cung cấp/hoàn tác) giữ NGUYÊN, không đổi 1 dòng nào so với bản gốc.
 let productDraft = null;
 let productPartnerQuery = '';
 let productHistCache = [];      // lịch sử đối tác đã từng bán sản phẩm này (khi sửa sản phẩm cũ)
 let productCandidates = [];      // danh sách hiển thị ở "Tìm đối tác cung cấp"
 let productCandidatesLoading = false;
 let productLoadError = null;
+// Khối nào đang mở rộng — mặc định mở khối chọn đối tác cung cấp, khối thông tin sản phẩm
+// thu gọn còn 1 dòng tên (accordion — chỉ 1 khối mở rộng tại 1 thời điểm).
+let expandedCard = 'source'; // 'info' | 'source'
 
 export async function openProductModal(productId){
+  if(productId !== (productDraft?.id||null)) expandedCard = 'source';
   productLoadError = null;
   productDraft = null;
-  openModal(loadingModalHtml(productId ? 'Sản phẩm' : 'Sản phẩm mới'), {});
+  paintEntityView('sanpham', { loading:true });
 
   try{
     let existing = null;
@@ -37,7 +46,7 @@ export async function openProductModal(productId){
       : { type:'kho', price: existing ? existing.import_price : 0 };
     productDraft = {
       id: productId || null,
-      name: existing ? existing.name : (searchQuery || ''),
+      name: existing ? existing.name : '',
       sellPriceRetail: existing ? existing.sell_price_retail : 0,
       sellPriceWholesale: existing ? existing.sell_price_wholesale : 0,
       source: defaultSource,
@@ -93,122 +102,144 @@ function sourceLabel(source){
   return known ? (known.name||known.partnerName) : '';
 }
 
-function loadingModalHtml(title){
+function paintProductModal(){
+  if(productLoadError){
+    paintEntityView('sanpham', { error:true, retryAction:'retry-product-modal' });
+    return;
+  }
+  if(!productDraft){
+    paintEntityView('sanpham', { loading:true });
+    return;
+  }
+  const isNew = !productDraft.id;
+  paintEntityView('sanpham', {
+    id: productDraft.id,
+    name: isNew ? 'Sản phẩm mới' : (productDraft.name || '(chưa đặt tên)'),
+    sub: isNew ? 'Chưa lưu' : `Tồn kho: ${productDraft.existingStockQty}`,
+    bodyHtml: productDetailCardsHtml(),
+    footerHtml: productFooterHtml(),
+    wire: wireProductModalInputs,
+  });
+}
+
+function productDetailCardsHtml(){
+  const infoOpen = expandedCard === 'info';
   return `
-    <div class="modal-handle"></div>
-    <div class="modal-head">
-      <div class="modal-title">${esc(title)}</div>
-      <div class="icon-btn" data-action="close-modal">${ICON.close}</div>
+    <div class="detail-card ${infoOpen?'':'collapsed'}">
+      ${infoOpen ? infoCardOpenHtml() : infoCardCollapsedHtml()}
     </div>
-    <div class="modal-body">
-      <div class="card">${loadingSkeleton(4)}</div>
+    <div class="detail-card ${infoOpen?'collapsed':''}">
+      ${infoOpen ? sourceCardCollapsedHtml() : sourceCardOpenHtml()}
     </div>
   `;
 }
 
-function paintProductModal(){
-  rerenderTopModal(productModalHtml());
-  wireProductModalInputs();
+function infoCardCollapsedHtml(){
+  return `
+    <div class="detail-card-head accordion-head" data-action="sp-expand-card" data-card="info">
+      <div class="detail-card-head-row">
+        <div class="eh-info">
+          <div class="field-label" style="margin-bottom:2px;">Tên sản phẩm</div>
+          <div class="accordion-collapsed-value">${esc(productDraft.name||'(chưa đặt tên)')}</div>
+        </div>
+        ${ICON.chevRight}
+      </div>
+    </div>
+  `;
 }
 
-function productModalHtml(){
-  if(productLoadError){
-    return `
-      <div class="modal-handle"></div>
-      <div class="modal-head">
-        <div class="modal-title">Sản phẩm</div>
-        <div class="icon-btn" data-action="close-modal">${ICON.close}</div>
-      </div>
-      <div class="modal-body">${errorBanner('Không tải được dữ liệu sản phẩm — kiểm tra lại kết nối mạng.', { retryAction:'retry-product-modal' })}</div>
-    `;
-  }
-  if(!productDraft) return loadingModalHtml('Sản phẩm');
-
-  const isNew = !productDraft.id;
+function infoCardOpenHtml(){
   const errors = productDraft.errors || {};
+  return `
+    <div class="detail-card-body">
+      ${errors.any ? `<div class="form-warning">${ICON.warn} Vui lòng nhập đủ thông tin sản phẩm trước khi lưu — các ô còn thiếu đã được đánh dấu đỏ bên dưới.</div>` : ''}
+      <div class="field">
+        <div class="field-label">Tên sản phẩm</div>
+        <input class="input ${errors.name?'error':''}" id="pf-name" value="${esc(productDraft.name)}" placeholder="VD: Ốp lưng iPhone 16">
+        ${errors.name?`<div class="field-error">${ICON.warn} Chưa nhập tên sản phẩm</div>`:''}
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <div class="field-label">Giá nhập (${esc(sourceLabel(productDraft.source))})</div>
+          <input class="input" type="number" id="pf-import" value="${productDraft.source.price||''}" placeholder="0">
+        </div>
+        ${productDraft.source.type==='partner' ? `
+        <div class="field">
+          <div class="field-label">SL nhập từ đối tác này</div>
+          <div class="qty-stepper">
+            <div class="qty-btn" data-action="restock-qty" data-delta="-1">${ICON.minus}</div>
+            <input class="qty-input" type="number" min="0" id="pf-restock-qty" value="${productDraft.restockQty}">
+            <div class="qty-btn" data-action="restock-qty" data-delta="1">${ICON.plus}</div>
+          </div>
+        </div>
+        ` : ''}
+      </div>
+      ${productDraft.source.type==='partner' ? `<div class="field-note" style="margin-top:-6px; margin-bottom:12px;">Tồn kho hiện tại: ${productDraft.existingStockQty}${productDraft.restockQty>0?` · Sẽ thêm ${productDraft.restockQty} vào đơn nhập chờ duyệt từ đối tác này — tồn kho chỉ tăng sau khi duyệt đơn ở màn Hàng nhập`:''}</div>` : ''}
+      <div class="field-row">
+        <div class="field">
+          <div class="field-label">Giá bán lẻ</div>
+          <input class="input" type="number" id="pf-sell-retail" value="${productDraft.sellPriceRetail||''}" placeholder="0">
+        </div>
+        <div class="field">
+          <div class="field-label">Giá bán sỉ</div>
+          <input class="input" type="number" id="pf-sell-wholesale" value="${productDraft.sellPriceWholesale||''}" placeholder="0">
+        </div>
+      </div>
+      <div class="field">
+        <div class="field-label">Đối tác</div>
+        <div class="readonly-field">${esc(sourceLabel(productDraft.source))}</div>
+      </div>
+    </div>
+  `;
+}
+
+function sourceCardCollapsedHtml(){
+  return `
+    <div class="detail-card-head accordion-head" data-action="sp-expand-card" data-card="source">
+      <div class="detail-card-head-row">
+        <div class="search-box" style="pointer-events:none;">${ICON.search}<span class="accordion-collapsed-value" style="color:var(--ink-faint); font-weight:400;">Đối tác: ${esc(sourceLabel(productDraft.source))}</span></div>
+      </div>
+    </div>
+  `;
+}
+
+function sourceCardOpenHtml(){
   const candidates = productCandidates;
   return `
-    <div class="modal-handle"></div>
-    <div class="modal-head">
-      <div class="modal-title">${isNew?'Sản phẩm mới':'Sản phẩm'}</div>
-      <div class="icon-btn" data-action="close-modal">${ICON.close}</div>
+    <div class="detail-card-head">
+      <div class="search-box">
+        ${ICON.search}
+        <input id="pf-partner-search" placeholder="Gõ tên đối tác…" value="${esc(productPartnerQuery)}" autocomplete="off">
+      </div>
     </div>
-    <div class="modal-body">
-      ${errors.any ? `<div class="form-warning">${ICON.warn} Vui lòng nhập đủ thông tin sản phẩm trước khi lưu — các ô còn thiếu đã được đánh dấu đỏ bên dưới.</div>` : ''}
-      <div class="card">
-        <div class="field">
-          <div class="field-label">Tên sản phẩm</div>
-          <input class="input ${errors.name?'error':''}" id="pf-name" value="${esc(productDraft.name)}" placeholder="VD: Ốp lưng iPhone 16">
-          ${errors.name?`<div class="field-error">${ICON.warn} Chưa nhập tên sản phẩm</div>`:''}
-        </div>
-        <div class="field-row">
-          <div class="field">
-            <div class="field-label">Giá nhập (${esc(sourceLabel(productDraft.source))})</div>
-            <input class="input" type="number" id="pf-import" value="${productDraft.source.price||''}" placeholder="0">
-          </div>
-          ${productDraft.source.type==='partner' ? `
-          <div class="field">
-            <div class="field-label">SL nhập từ đối tác này</div>
-            <div class="qty-stepper">
-              <div class="qty-btn" data-action="restock-qty" data-delta="-1">${ICON.minus}</div>
-              <input class="qty-input" type="number" min="0" id="pf-restock-qty" value="${productDraft.restockQty}">
-              <div class="qty-btn" data-action="restock-qty" data-delta="1">${ICON.plus}</div>
+    <div class="detail-card-body">
+      <div class="field-label" style="margin-bottom:9px;">Tìm đối tác cung cấp</div>
+      <div class="source-row ${productDraft.source.type==='kho'?'selected':''}" data-action="select-source" data-type="kho">
+        <div class="source-left"><span class="dot dot-kho"></span><span class="source-name">Trong kho</span></div>
+        <div class="source-price">${productDraft.id ? fmtVND(productDraft.existingImportPrice) : ''}</div>
+      </div>
+      ${productCandidatesLoading ? loadingSkeleton(2) : candidates.map(h=>`
+        <div class="source-row ${productDraft.source.type==='partner'&&productDraft.source.partnerId===h.partnerId?'selected':''}" data-action="select-source" data-type="partner" data-partner="${h.partnerId}" data-price="${h.price||0}" data-known="${h.known?1:0}" data-name="${esc(h.name)}">
+          <div class="source-left">
+            <span class="dot dot-doitac"></span>
+            <div>
+              <div class="source-name">${esc(h.name)}</div>
+              <div class="source-time">${h.known ? timeAgo(h.date) : 'Chưa từng nhập'}</div>
             </div>
           </div>
-          ` : ''}
+          <div class="source-price">${h.known ? fmtVND(h.price) : ''}</div>
         </div>
-        ${productDraft.source.type==='partner' ? `<div class="field-note" style="margin-top:-6px; margin-bottom:12px;">Tồn kho hiện tại: ${productDraft.existingStockQty}${productDraft.restockQty>0?` · Sẽ thêm ${productDraft.restockQty} vào đơn nhập chờ duyệt từ đối tác này — tồn kho chỉ tăng sau khi duyệt đơn ở màn Hàng nhập`:''}</div>` : ''}
-        <div class="field-row">
-          <div class="field">
-            <div class="field-label">Giá bán lẻ</div>
-            <input class="input" type="number" id="pf-sell-retail" value="${productDraft.sellPriceRetail||''}" placeholder="0">
-          </div>
-          <div class="field">
-            <div class="field-label">Giá bán sỉ</div>
-            <input class="input" type="number" id="pf-sell-wholesale" value="${productDraft.sellPriceWholesale||''}" placeholder="0">
-          </div>
-        </div>
-        <div class="field">
-          <div class="field-label">Đối tác</div>
-          <div class="readonly-field">${esc(sourceLabel(productDraft.source))}</div>
-        </div>
-      </div>
-
-      <div class="card" style="margin-bottom:12px;">
-        <div class="search-box">
-          ${ICON.search}
-          <input id="pf-partner-search" placeholder="Gõ tên đối tác…" value="${esc(productPartnerQuery)}" autocomplete="off">
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="field-label" style="margin-bottom:9px;">Tìm đối tác cung cấp</div>
-        <div class="source-row ${productDraft.source.type==='kho'?'selected':''}" data-action="select-source" data-type="kho">
-          <div class="source-left"><span class="dot dot-kho"></span><span class="source-name">Trong kho</span></div>
-          <div class="source-price">${productDraft.id ? fmtVND(productDraft.existingImportPrice) : ''}</div>
-        </div>
-        ${productCandidatesLoading ? loadingSkeleton(2) : candidates.map(h=>`
-          <div class="source-row ${productDraft.source.type==='partner'&&productDraft.source.partnerId===h.partnerId?'selected':''}" data-action="select-source" data-type="partner" data-partner="${h.partnerId}" data-price="${h.price||0}" data-known="${h.known?1:0}" data-name="${esc(h.name)}">
-            <div class="source-left">
-              <span class="dot dot-doitac"></span>
-              <div>
-                <div class="source-name">${esc(h.name)}</div>
-                <div class="source-time">${h.known ? timeAgo(h.date) : 'Chưa từng nhập'}</div>
-              </div>
-            </div>
-            <div class="source-price">${h.known ? fmtVND(h.price) : ''}</div>
-          </div>
-        `).join('')}
-        ${!productCandidatesLoading && !candidates.length ? `<div class="field-note">Không tìm thấy đối tác phù hợp.</div>` : ''}
-      </div>
+      `).join('')}
+      ${!productCandidatesLoading && !candidates.length ? `<div class="field-note">Không tìm thấy đối tác phù hợp.</div>` : ''}
     </div>
-    <div class="modal-foot">
-      ${isNew
-        ? `<button class="btn btn-ghost" data-action="close-modal">Đóng</button>`
-        : `<button class="btn btn-danger-ghost" data-action="delete-product">${ICON.trash} Xóa</button>`
-      }
-      <button class="btn btn-primary btn-block" data-action="save-product">${ICON.check} ${isNew?'Tạo mới':'Cập nhật'}</button>
-    </div>
+  `;
+}
+
+function productFooterHtml(){
+  const isNew = !productDraft.id;
+  return `
+    ${isNew ? '' : `<button class="btn btn-sm btn-danger-ghost" data-action="delete-product">${ICON.trash} Xóa</button>`}
+    <button class="btn btn-sm btn-primary btn-block" data-action="save-product">${ICON.check} ${isNew?'Tạo mới':'Cập nhật'}</button>
   `;
 }
 
@@ -225,8 +256,7 @@ function wireProductModalInputs(){
   const restockEl = byId('pf-restock-qty');
   if(restockEl) restockEl.addEventListener('input', e=>{
     productDraft.restockQty = Math.max(0, parseInt(e.target.value)||0);
-    rerenderTopModal(productModalHtml());
-    wireProductModalInputs();
+    paintProductModal();
   });
   const partnerSearchEl = byId('pf-partner-search');
   if(partnerSearchEl){
@@ -241,11 +271,16 @@ const schedulePartnerSearch = debounce(async ()=>{
   const myQuery = productPartnerQuery;
   await loadFallbackCandidates(myQuery);
   if(myQuery !== productPartnerQuery) return;
-  rerenderTopModal(productModalHtml());
-  wireProductModalInputs();
+  paintProductModal();
   const fresh = document.getElementById('pf-partner-search');
   if(fresh){ fresh.focus(); fresh.setSelectionRange(fresh.value.length, fresh.value.length); }
 }, 1000);
+
+// Gọi lại khi mainScreen.js chuyển về tab Sản phẩm — vẽ lại từ state hiện có trong bộ nhớ,
+// KHÔNG tải lại từ mạng (tránh mất dữ liệu đang gõ dở của sản phẩm mới chưa lưu).
+export function repaintProductView(){
+  paintProductModal();
+}
 
 export function handleProductModalAction(action, el){
   switch(action){
@@ -275,6 +310,10 @@ export function handleProductModalAction(action, el){
     case 'retry-product-modal':
       openProductModal(productDraft?.id || null);
       return true;
+    case 'sp-expand-card':
+      expandedCard = el.dataset.card;
+      paintProductModal();
+      return true;
   }
   return false;
 }
@@ -291,9 +330,10 @@ function confirmDeleteProduct(){
 async function commitDeleteProduct(){
   try{
     await deleteProduct(productDraft.id);
-    requestCloseTopModal();
-    resetSearchAndRefresh();
-    showToast(`Đã xóa sản phẩm "${productDraft.name}".`, []);
+    const deletedName = productDraft.name;
+    openProductModal(null);
+    refreshMainCounts();
+    showToast(`Đã xóa sản phẩm "${deletedName}".`, []);
   } catch(err){
     if(err && err.code === '23503'){
       showToast(`Không xóa được "${productDraft.name}" — sản phẩm đã có trong lịch sử đơn hàng/nhập hàng nên phải giữ lại. Có thể đặt giá bán về 0 nếu không muốn bán nữa.`, []);
@@ -354,18 +394,20 @@ async function commitProductSave(){
     }
 
     const restockQty = productDraft.restockQty || 0;
+    const savedSourceType = productDraft.source.type;
+    const savedSourcePartnerId = productDraft.source.partnerId;
     let poLineResult = null;
     if(productDraft.source.type==='partner' && restockQty > 0){
       poLineResult = await addToPartnerDraftOrder(productDraft.source.partnerId, product.id, restockQty, productDraft.source.price);
       notifyPurchaseOrdersChanged();
     }
 
-    requestCloseTopModal();
-    resetSearchAndRefresh();
+    const beforeFull = isEdit ? productDraft.existingSnapshot : null;
+    openProductModal(product.id);
+    refreshMainCounts();
 
     const restockNote = restockQty>0 ? ` Đã thêm ${restockQty} vào đơn nhập chờ duyệt từ đối tác — vào Hàng nhập để duyệt.` : '';
     if(isEdit){
-      const beforeFull = productDraft.existingSnapshot;
       showToast(`Đã cập nhật "${name}".${restockNote}`, [], { icon:ICON.check, undo: async ()=>{
         try{
           await updateProduct(product.id, {
@@ -380,11 +422,11 @@ async function commitProductSave(){
             }
             notifyPurchaseOrdersChanged();
           }
-          if(productDraft.source.type==='partner'){
+          if(savedSourceType==='partner'){
             if(beforePartnerPrice) await setPartnerPrice(beforePartnerPrice.partnerId, product.id, beforePartnerPrice.price);
-            else await deletePartnerPrice(productDraft.source.partnerId, product.id);
+            else await deletePartnerPrice(savedSourcePartnerId, product.id);
           }
-          resetSearchAndRefresh();
+          refreshMainCounts();
           showToast(`Đã hoàn tác thay đổi cho "${beforeFull.name}".`, []);
         } catch(err){
           showToast('Không hoàn tác được — kiểm tra lại kết nối mạng.', []);
