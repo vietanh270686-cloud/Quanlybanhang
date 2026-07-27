@@ -63,7 +63,13 @@ export async function openCustomerModal(idOrNull){
   paint();
 }
 
-function saveNewCustomerForm(){
+// Chặn tạo trùng do bấm "Tạo mới" 2 lần liên tiếp (double-tap/mạng chậm bấm lại) — nếu không,
+// cả 2 lần bấm đều chạy findByExactName song song, cả 2 đều thấy CHƯA có (vì lần tạo trước
+// chưa kịp lưu xong), nên cả 2 đều lọt qua cảnh báo trùng tên và cùng tạo 1 bản ghi riêng.
+let isSavingNewCustomer = false;
+
+async function saveNewCustomerForm(){
+  if(isSavingNewCustomer) return;
   const typedName = (customerDraft.name||'').trim();
   if(!typedName){
     customerDraft.errors = { name:true, any:true };
@@ -71,7 +77,12 @@ function saveNewCustomerForm(){
     return;
   }
   customerDraft.errors = {};
-  checkDupThenCommitNewCustomer(typedName);
+  isSavingNewCustomer = true;
+  try{
+    await checkDupThenCommitNewCustomer(typedName);
+  } finally {
+    isSavingNewCustomer = false;
+  }
 }
 
 async function checkDupThenCommitNewCustomer(typedName){
@@ -82,7 +93,7 @@ async function checkDupThenCommitNewCustomer(typedName){
       return;
     }
   } catch(err){ /* không chặn tạo mới nếu kiểm tra trùng tên bị lỗi mạng */ }
-  commitNewCustomer(typedName);
+  return commitNewCustomer(typedName);
 }
 
 async function commitNewCustomer(typedName){

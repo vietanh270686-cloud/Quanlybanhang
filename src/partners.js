@@ -72,7 +72,12 @@ export async function openPartnerModal(idOrNull){
   paint();
 }
 
-function saveNewPartnerForm(){
+// Chặn tạo trùng do bấm "Tạo mới" 2 lần liên tiếp (double-tap/mạng chậm bấm lại) — xem ghi chú
+// tương tự trong customers.js.
+let isSavingNewPartner = false;
+
+async function saveNewPartnerForm(){
+  if(isSavingNewPartner) return;
   const typedName = (partnerDraft.name||'').trim();
   if(!typedName){
     partnerDraft.errors = { name:true, any:true };
@@ -80,7 +85,12 @@ function saveNewPartnerForm(){
     return;
   }
   partnerDraft.errors = {};
-  checkDupThenCommitNewPartner(typedName);
+  isSavingNewPartner = true;
+  try{
+    await checkDupThenCommitNewPartner(typedName);
+  } finally {
+    isSavingNewPartner = false;
+  }
 }
 
 async function checkDupThenCommitNewPartner(typedName){
@@ -91,7 +101,7 @@ async function checkDupThenCommitNewPartner(typedName){
       return;
     }
   } catch(err){ /* không chặn tạo mới nếu kiểm tra trùng tên bị lỗi mạng */ }
-  commitNewPartner(typedName);
+  return commitNewPartner(typedName);
 }
 
 async function commitNewPartner(typedName){

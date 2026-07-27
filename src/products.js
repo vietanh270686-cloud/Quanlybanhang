@@ -343,7 +343,12 @@ async function commitDeleteProduct(){
   }
 }
 
+// Chặn lưu trùng do bấm "Tạo mới"/"Cập nhật" 2 lần liên tiếp (double-tap/mạng chậm bấm lại) —
+// xem ghi chú tương tự trong customers.js.
+let isSavingProduct = false;
+
 async function saveProductDraft(){
+  if(isSavingProduct) return;
   const name = (productDraft.name||'').trim();
   if(!name){
     productDraft.errors = { name:true, any:true };
@@ -351,16 +356,21 @@ async function saveProductDraft(){
     return;
   }
   productDraft.errors = {};
-  if(!productDraft.id){
-    try{
-      const dup = await findByExactName('products', name);
-      if(dup){
-        openConfirmModal('Tên sản phẩm đã tồn tại', `Đã có sản phẩm tên "${name}" trong hệ thống. Vẫn muốn tạo thêm sản phẩm trùng tên?`, ()=>commitProductSave());
-        return;
-      }
-    } catch(err){ /* không chặn tạo mới nếu kiểm tra trùng tên bị lỗi mạng */ }
+  isSavingProduct = true;
+  try{
+    if(!productDraft.id){
+      try{
+        const dup = await findByExactName('products', name);
+        if(dup){
+          openConfirmModal('Tên sản phẩm đã tồn tại', `Đã có sản phẩm tên "${name}" trong hệ thống. Vẫn muốn tạo thêm sản phẩm trùng tên?`, ()=>commitProductSave());
+          return;
+        }
+      } catch(err){ /* không chặn tạo mới nếu kiểm tra trùng tên bị lỗi mạng */ }
+    }
+    await commitProductSave();
+  } finally {
+    isSavingProduct = false;
   }
-  commitProductSave();
 }
 
 async function commitProductSave(){
