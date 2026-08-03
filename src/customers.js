@@ -45,7 +45,10 @@ export async function openCustomerModal(idOrNull){
   paint();
 
   try{
-    const [products, importMap] = await Promise.all([ searchProductsByName(''), getLatestImportPriceMap() ]);
+    // Ô "Tìm sản phẩm nhanh" chỉ lọc trên danh sách đã tải sẵn ở đây (không gọi mạng khi gõ),
+    // nên phải tải đủ TOÀN BỘ catalog — nếu giới hạn mặc định (50) sẽ làm mất các sản phẩm
+    // có tên xếp sau trong bảng chữ cái, gõ tìm kiểu gì cũng không thấy.
+    const [products, importMap] = await Promise.all([ searchProductsByName('', 1000), getLatestImportPriceMap() ]);
     quickAddProducts = products;
     latestImportMap = importMap;
 

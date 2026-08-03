@@ -44,7 +44,9 @@ export async function openPartnerModal(idOrNull){
   paint();
 
   try{
-    quickAddProducts = await searchProductsByName('');
+    // Ô "Tìm sản phẩm nhanh" chỉ lọc trên danh sách đã tải sẵn ở đây (không gọi mạng khi gõ),
+    // nên phải tải đủ TOÀN BỘ catalog — xem ghi chú tương tự trong customers.js.
+    quickAddProducts = await searchProductsByName('', 1000);
 
     if(isNewPartner){
       partnerDraft = { name:'', seller1:{name:'',phone:''}, seller2:{name:'',phone:''}, address:'', facebookId:'', errors:{} };
