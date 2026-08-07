@@ -178,7 +178,7 @@ function buildBillText(o){
   const lines = o.sales_order_lines || [];
   const total = lines.reduce((s,l)=> s + l.qty*l.sell_price, 0);
   const body = lines.map(l=>`${l.products?.name} × ${l.qty} = ${fmtVND(l.qty*l.sell_price)}`).join('\n');
-  return `HÓA ĐƠN — ${custName}\nNgày: ${fmtDate(o.order_date)}\n\n${body}\n\nTổng cộng: ${fmtVND(total)}\n\nThông tin chuyển khoản:\n${BANK_INFO}`;
+  return `HÓA ĐƠN — ${custName}\nNgày: ${fmtDate(o.order_date)}\n\n${body}\n\nTổng cộng: ${fmtVND(total)}\n\nThông tin chuyển khoản:\n${BANK_INFO}\n\nVui lòng không ghi nội dung chuyển khoản mua bán, Em xin cảm ơn!`;
 }
 
 function findOrder(id){
