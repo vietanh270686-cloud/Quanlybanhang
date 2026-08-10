@@ -76,6 +76,14 @@ export async function closeSalesOrder(id){
   if(error) throw error;
 }
 
+// Sửa lại đơn bán ĐÃ CHỐT (thêm/bớt/đổi dòng) — chạy qua Postgres function để tự tính lại đúng
+// tồn kho + công nợ trong cùng 1 giao dịch. lines: [{lineId|null, productId, qty, sellPrice}].
+export async function editClosedSalesOrder(soId, lines){
+  const p_lines = lines.map(l=>({ line_id: l.lineId||null, product_id: l.productId, qty: l.qty, sell_price: l.sellPrice }));
+  const { error } = await supabase.rpc('edit_closed_sales_order', { p_so_id: soId, p_lines });
+  if(error) throw error;
+}
+
 export async function listSalesOrdersByDate(date){
   const { data, error } = await supabase
     .from('sales_orders')

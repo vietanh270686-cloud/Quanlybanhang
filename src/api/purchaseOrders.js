@@ -86,6 +86,15 @@ export async function closePurchaseOrder(id){
   return data||[];
 }
 
+// Sửa lại đơn nhập ĐÃ CHỐT (thêm/bớt/đổi dòng) — chạy qua Postgres function để tự tính lại đúng
+// tồn kho + công nợ trong cùng 1 giao dịch. KHÔNG chạy lại cơ chế khớp bù thiếu/nhập dư.
+// lines: [{lineId|null, productId, qty, importPrice}].
+export async function editClosedPurchaseOrder(poId, lines){
+  const p_lines = lines.map(l=>({ line_id: l.lineId||null, product_id: l.productId, qty: l.qty, import_price: l.importPrice }));
+  const { error } = await supabase.rpc('edit_closed_purchase_order', { p_po_id: poId, p_lines });
+  if(error) throw error;
+}
+
 export async function listPurchaseOrdersByDate(date){
   const { data, error } = await supabase
     .from('purchase_orders')

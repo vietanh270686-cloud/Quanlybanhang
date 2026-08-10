@@ -6,6 +6,7 @@ import {
   listDebtEntities, getDebtGrandTotal, recordPayment, revertPayment, recordAdjustment, revertAdjustment,
 } from './api/debt.js';
 import { getCustomerHistory, getPartnerHistory } from './api/reports.js';
+import { openEditOrderModal } from './editOrderModal.js';
 
 const DEBT_CONFIRM_THRESHOLD = 2000000;
 // Mốc ngày rất xa trong quá khứ, dùng để lấy TOÀN BỘ lịch sử của 1 khách/đối tác (rồi chỉ hiện
@@ -94,17 +95,21 @@ async function loadEntityHistory(id){
 function historyRowHtml(row, isCustomer){
   if(row.kind==='order'){
     return `
-      <div class="order-line-mini">
+      <div class="order-line-mini" style="cursor:pointer;" data-action="debt-view-order" data-kind="${isCustomer?'sales':'purchase'}" data-id="${row.id}">
         <div class="l"><span class="nm">${fmtDate(row.date)} · Đơn ${isCustomer?'bán':'nhập'} đã chốt</span></div>
         <div class="r">${fmtVND(row.amount)}</div>
       </div>
       <div class="field-note" style="margin:-3px 0 8px; text-align:right;">Công nợ sau dòng này: ${fmtVND(row.balanceAfter)}</div>
     `;
   }
+  const log = row.raw;
+  const isOrderEdit = log?.log_type === 'order_edit';
+  const label = isOrderEdit ? 'Sửa đơn hàng' : 'Thanh toán';
+  const isReduce = isOrderEdit ? (log.amount||0) < 0 : true;
   return `
     <div class="order-line-mini">
-      <div class="l"><span class="nm">${fmtDate(row.date)} · Thanh toán</span></div>
-      <div class="r" style="color:var(--profit);">−${fmtVND(Math.abs(row.raw?.amount||0))}</div>
+      <div class="l"><span class="nm">${fmtDate(row.date)} · ${label}</span></div>
+      <div class="r" style="color:${isReduce?'var(--profit)':'var(--loss)'};">${isReduce?'−':'+'}${fmtVND(Math.abs(log?.amount||0))}</div>
     </div>
     <div class="field-note" style="margin:-3px 0 8px; text-align:right;">Công nợ sau dòng này: ${fmtVND(row.balanceAfter)}</div>
   `;
@@ -346,6 +351,14 @@ export function handleDebtScreenAction(action, el){
     case 'retry-debt-screen': loadEntities(); return true;
     case 'debt-history-limit': historyLimit = parseInt(el.dataset.limit)||10; paintWithInputs(); return true;
     case 'retry-debt-history': if(selectedDebtId) loadEntityHistory(selectedDebtId); return true;
+    case 'debt-view-order': {
+      const entityId = selectedDebtId;
+      openEditOrderModal(el.dataset.kind, el.dataset.id, ()=>{
+        if(selectedDebtId===entityId) loadEntityHistory(entityId);
+        loadEntities();
+      });
+      return true;
+    }
   }
   return false;
 }

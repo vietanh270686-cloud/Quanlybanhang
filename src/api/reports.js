@@ -117,12 +117,14 @@ function buildEntityTimeline({ orders, orderAmountFn, logs, currentDebt, fromDat
     if(match){ usedLogIds.add(match.raw.id); return { ...e, balanceAfter: match.balanceAfter }; }
     return { ...e, balanceAfter: carryBalance };
   });
-  // Chỉ HIỂN THỊ đơn hàng đã chốt + thanh toán thực tế — ẩn dòng "Điều chỉnh công nợ" khỏi
-  // danh sách (dữ liệu thực tế cho thấy log_type='adjustment' chính là cách hàm chốt đơn tự
-  // ghi nợ, trùng khớp 1-1 với dòng đơn hàng ngay bên cạnh — hiện cả 2 trông như tăng nợ 2 lần).
-  // Vẫn dùng đủ các dòng "adjustment" này để tính đúng số dư luỹ kế ở trên trước khi lọc bỏ,
-  // nên số "Công nợ sau dòng này" của các dòng còn lại vẫn chính xác.
-  const visibleRows = rows.filter(r=> r.kind==='order' || r.raw.log_type==='payment');
+  // Chỉ HIỂN THỊ đơn hàng đã chốt + thanh toán thực tế + sửa đơn đã chốt — ẩn dòng "Điều chỉnh
+  // công nợ" (log_type='adjustment') khỏi danh sách (dữ liệu thực tế cho thấy đây chính là cách
+  // hàm chốt đơn tự ghi nợ, trùng khớp 1-1 với dòng đơn hàng ngay bên cạnh — hiện cả 2 trông như
+  // tăng nợ 2 lần). "order_edit" (sửa đơn đã chốt qua editOrderModal.js) NGƯỢC LẠI cần hiện rõ,
+  // vì đó là 1 giao dịch thật, không trùng với dòng đơn hàng nào khác. Vẫn dùng đủ các dòng
+  // "adjustment" để tính đúng số dư luỹ kế ở trên trước khi lọc bỏ, nên số "Công nợ sau dòng
+  // này" của các dòng còn lại vẫn chính xác.
+  const visibleRows = rows.filter(r=> r.kind==='order' || r.raw.log_type==='payment' || r.raw.log_type==='order_edit');
   // Hiển thị gần nhất trước (xa nhất cuối) — số dư từng dòng đã tính xong ở bước trên nên
   // đảo thứ tự ở đây không ảnh hưởng tới độ chính xác, chỉ đổi thứ tự hiển thị.
   visibleRows.reverse();

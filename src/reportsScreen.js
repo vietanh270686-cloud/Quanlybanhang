@@ -7,6 +7,7 @@ import {
 } from './api/reports.js';
 import { searchCustomersByName } from './api/customers.js';
 import { searchPartnersFull } from './api/partners.js';
+import { openEditOrderModal } from './editOrderModal.js';
 
 let screenWrap = null;
 let reportType = 'revenue'; // 'revenue' | 'customer-history' | 'partner-history'
@@ -242,7 +243,7 @@ function historyRowHtml(row){
   const isCustomer = reportType==='customer-history';
   if(row.kind==='order'){
     return `
-      <div class="order-line-mini">
+      <div class="order-line-mini" style="cursor:pointer;" data-action="rp-view-order" data-kind="${isCustomer?'sales':'purchase'}" data-id="${row.id}">
         <div class="l"><span class="nm">${fmtDate(row.date)} · Đơn ${isCustomer?'bán':'nhập'} đã chốt</span></div>
         <div class="r">${fmtVND(row.amount)}</div>
       </div>
@@ -250,8 +251,8 @@ function historyRowHtml(row){
     `;
   }
   const log = row.raw;
-  const label = log.log_type==='payment' ? 'Thanh toán' : log.log_type==='adjustment' ? 'Điều chỉnh công nợ' : 'Phát sinh công nợ';
-  const isReduce = log.log_type==='payment' || (log.log_type==='adjustment' && (log.amount||0)<0);
+  const label = log.log_type==='payment' ? 'Thanh toán' : log.log_type==='order_edit' ? 'Sửa đơn hàng' : log.log_type==='adjustment' ? 'Điều chỉnh công nợ' : 'Phát sinh công nợ';
+  const isReduce = log.log_type==='payment' || ((log.log_type==='adjustment' || log.log_type==='order_edit') && (log.amount||0)<0);
   return `
     <div class="order-line-mini">
       <div class="l"><span class="nm">${fmtDate(row.date)} · ${label}</span></div>
@@ -408,6 +409,7 @@ export function handleReportsScreenAction(action, el){
       loadPickerItems();
       return true;
     case 'retry-history': loadHistory(); return true;
+    case 'rp-view-order': openEditOrderModal(el.dataset.kind, el.dataset.id, ()=>loadHistory()); return true;
   }
   return false;
 }

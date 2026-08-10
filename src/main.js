@@ -11,6 +11,7 @@ import { openDebtScreen, handleDebtScreenAction } from './debtScreen.js';
 import { openWarehouseScreen, handleWarehouseAction } from './warehouseScreen.js';
 import { handleRestockModalAction } from './restockModal.js';
 import { openReportsScreen, handleReportsScreenAction } from './reportsScreen.js';
+import { handleEditOrderModalAction } from './editOrderModal.js';
 
 let appStarted = false;
 
@@ -47,6 +48,7 @@ function startAppEvents(){
     if(handleWarehouseAction(action, el)) return;
     if(handleRestockModalAction(action, el)) return;
     if(handleReportsScreenAction(action, el)) return;
+    if(handleEditOrderModalAction(action, el)) return;
     if(handleMainScreenAction(action, el)) return;
 
     switch(action){
