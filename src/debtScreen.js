@@ -1,12 +1,17 @@
 import { ICON } from './icons.js';
-import { esc, fmtVND, fmtDateInputToVN, debounce } from './utils.js';
+import { esc, fmtVND, fmtDate, fmtDateInputToVN, debounce, todayStr } from './utils.js';
 import { openModal, rerenderTopModal, openConfirmModal, loadingSkeleton, errorBanner } from './modal.js';
 import { showToast } from './toast.js';
 import {
   listDebtEntities, getDebtGrandTotal, recordPayment, revertPayment, recordAdjustment, revertAdjustment,
 } from './api/debt.js';
+import { getCustomerHistory, getPartnerHistory } from './api/reports.js';
 
 const DEBT_CONFIRM_THRESHOLD = 2000000;
+// Mốc ngày rất xa trong quá khứ, dùng để lấy TOÀN BỘ lịch sử của 1 khách/đối tác (rồi chỉ hiện
+// N giao dịch gần nhất trên client) — tái dùng đúng hàm getCustomerHistory/getPartnerHistory đã
+// viết cho Báo cáo, không cần thêm truy vấn riêng.
+const HISTORY_FROM = '2000-01-01';
 
 let screenWrap = null;
 let debtTab = 'customer';
@@ -17,6 +22,12 @@ let entities = [];
 let grandTotal = 0;
 let entitiesLoading = true;
 let entitiesError = null;
+// Lịch sử giao dịch gần đây của bản ghi đang chọn (đơn hàng đã chốt + thanh toán, mới nhất
+// trước) — hiện ngay trong Quản lý công nợ để tiện đối chiếu khi đang xử lý công nợ người đó.
+let historyRows = null;
+let historyLimit = 10;
+let historyLoading = false;
+let historyError = null;
 
 export async function openDebtScreen(){
   debtTab = 'customer';
@@ -56,6 +67,47 @@ function refresh(){
   if(!screenWrap?.isConnected) return;
   rerenderTopModal(screenHtml());
   wireInputs();
+}
+
+// Tải lịch sử (đơn hàng đã chốt + thanh toán, mới nhất trước) cho bản ghi đang chọn — chỉ cần
+// tải 1 lần khi chọn bản ghi, bấm đổi 10/20/30 chỉ cắt lại mảng đã có sẵn, không gọi mạng lại.
+async function loadEntityHistory(id){
+  const isCustomer = debtTab === 'customer';
+  const myId = id, myTab = debtTab;
+  historyLoading = true; historyError = null; historyRows = null;
+  refresh();
+  try{
+    const data = isCustomer
+      ? await getCustomerHistory(id, HISTORY_FROM, todayStr())
+      : await getPartnerHistory(id, HISTORY_FROM, todayStr());
+    if(myId !== selectedDebtId || myTab !== debtTab) return; // đã chuyển sang bản ghi khác
+    historyRows = data.rows;
+    historyError = null;
+  } catch(err){
+    if(myId !== selectedDebtId || myTab !== debtTab) return;
+    historyError = err;
+  }
+  historyLoading = false;
+  refresh();
+}
+
+function historyRowHtml(row, isCustomer){
+  if(row.kind==='order'){
+    return `
+      <div class="order-line-mini">
+        <div class="l"><span class="nm">${fmtDate(row.date)} · Đơn ${isCustomer?'bán':'nhập'} đã chốt</span></div>
+        <div class="r">${fmtVND(row.amount)}</div>
+      </div>
+      <div class="field-note" style="margin:-3px 0 8px; text-align:right;">Công nợ sau dòng này: ${fmtVND(row.balanceAfter)}</div>
+    `;
+  }
+  return `
+    <div class="order-line-mini">
+      <div class="l"><span class="nm">${fmtDate(row.date)} · Thanh toán</span></div>
+      <div class="r" style="color:var(--profit);">−${fmtVND(Math.abs(row.raw?.amount||0))}</div>
+    </div>
+    <div class="field-note" style="margin:-3px 0 8px; text-align:right;">Công nợ sau dòng này: ${fmtVND(row.balanceAfter)}</div>
+  `;
 }
 
 function screenHtml(){
@@ -126,6 +178,19 @@ function screenHtml(){
           </div>
         </div>
       </div>
+
+      <div class="card" style="margin:12px 16px 0;">
+        <div class="detail-card-head-row" style="margin-bottom:9px;">
+          <div class="field-label" style="margin-bottom:0;">Lịch sử gần đây</div>
+          <div style="display:flex; gap:6px;">
+            ${[10,20,30].map(n=>`<button type="button" class="btn btn-sm ${historyLimit===n?'btn-primary':'btn-ghost'}" data-action="debt-history-limit" data-limit="${n}">${n}</button>`).join('')}
+          </div>
+        </div>
+        ${historyLoading ? loadingSkeleton(3)
+          : historyError ? errorBanner('Không tải được lịch sử — kiểm tra lại kết nối mạng.', { retryAction:'retry-debt-history' })
+          : (historyRows && historyRows.length) ? historyRows.slice(0, historyLimit).map(r=>historyRowHtml(r, debtTab==='customer')).join('')
+          : `<div class="field-note">Chưa có đơn hàng/thanh toán nào.</div>`}
+      </div>
       ` : `<div class="field-note" style="padding:14px 16px 0;">Chạm vào một dòng ở trên để xem và cập nhật chi tiết công nợ.</div>`}
       `}
     </div>
@@ -140,6 +205,7 @@ function screenHtml(){
 const scheduleDebtSearch = debounce(async ()=>{
   selectedDebtId = null;
   debtForm = null;
+  historyRows = null; historyLimit = 10; historyError = null;
   await loadEntities();
   const fresh = document.getElementById('debt-search');
   if(fresh){ fresh.focus(); fresh.setSelectionRange(fresh.value.length, fresh.value.length); }
@@ -168,13 +234,16 @@ function setDebtTab(tab){
   debtQuery = '';
   selectedDebtId = null;
   debtForm = null;
+  historyRows = null; historyLimit = 10; historyError = null;
   loadEntities();
 }
 function selectDebtEntity(id){
   selectedDebtId = id;
   const entity = entities.find(e=>e.id===id);
   debtForm = { debtAmount: entity.debt, paymentAmount:'', paymentDate:'', errors:{} };
+  historyLimit = 10;
   paintWithInputs();
+  loadEntityHistory(id);
 }
 
 function saveDebt(entityId){
@@ -222,6 +291,7 @@ async function commitDebtPayment(entityId, amount, isoDate){
     grandTotal += (updated.debt - before);
     debtForm = { debtAmount: entity.debt, paymentAmount:'', paymentDate:'', errors:{} };
     paintWithInputs();
+    if(selectedDebtId===entityId) loadEntityHistory(entityId);
     showToast(`Đã ghi nhận thanh toán ${fmtVND(amount)} cho "${entity.name}".`, [], { icon:ICON.check, undo: async ()=>{
       try{
         await revertPayment(debtTab, entityId, before, log.id);
@@ -229,6 +299,7 @@ async function commitDebtPayment(entityId, amount, isoDate){
         entity.debt = before;
         if(selectedDebtId===entityId) debtForm = { debtAmount:entity.debt, paymentAmount:'', paymentDate:'', errors:{} };
         paintWithInputs();
+        if(selectedDebtId===entityId) loadEntityHistory(entityId);
         showToast('Đã hoàn tác thanh toán.', []);
       } catch(err){
         showToast('Không hoàn tác được — kiểm tra lại kết nối mạng.', []);
@@ -248,6 +319,7 @@ async function commitDebtAdjustment(entityId, newDebt){
     grandTotal += (updated.debt - before);
     debtForm.debtAmount = entity.debt;
     paintWithInputs();
+    if(selectedDebtId===entityId) loadEntityHistory(entityId);
     showToast(`Đã cập nhật công nợ của "${entity.name}" thành ${fmtVND(newDebt)}.`, [], { icon:ICON.check, undo: async ()=>{
       try{
         await revertAdjustment(debtTab, entityId, before, log.id);
@@ -255,6 +327,7 @@ async function commitDebtAdjustment(entityId, newDebt){
         entity.debt = before;
         if(selectedDebtId===entityId) debtForm.debtAmount = entity.debt;
         paintWithInputs();
+        if(selectedDebtId===entityId) loadEntityHistory(entityId);
         showToast('Đã hoàn tác điều chỉnh công nợ.', []);
       } catch(err){
         showToast('Không hoàn tác được — kiểm tra lại kết nối mạng.', []);
@@ -271,6 +344,8 @@ export function handleDebtScreenAction(action, el){
     case 'select-debt-entity': selectDebtEntity(el.dataset.id); return true;
     case 'save-debt': saveDebt(el.dataset.id); return true;
     case 'retry-debt-screen': loadEntities(); return true;
+    case 'debt-history-limit': historyLimit = parseInt(el.dataset.limit)||10; paintWithInputs(); return true;
+    case 'retry-debt-history': if(selectedDebtId) loadEntityHistory(selectedDebtId); return true;
   }
   return false;
 }
